@@ -1,0 +1,135 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: teis_mysql
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root_secure_pass
+      MYSQL_DATABASE: ${DB_NAME:-teis_db}
+      MYSQL_USER: ${DB_USER:-teis_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-teis_secure_pass}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  redis:
+    image: redis:alpine
+    container_name: teis_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  minio:
+    image: minio/minio:RELEASE.2024-01-28T22-41-13Z
+    container_name: teis_minio
+    restart: always
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-teis_minio_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-teis_minio_secret_pass}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc
+    container_name: teis_minio_init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until (/usr/bin/mc alias set localhttp http://minio:9000 teis_minio_admin teis_minio_secret_pass) do echo 'Waiting for MinIO...' && sleep 1; done;
+      /usr/bin/mc mb --ignore-existing localhttp/teis-screenshots;
+      /usr/bin/mc anonymous set download localhttp/teis-screenshots;
+      echo 'Bucket created successfully!';
+      exit 0;
+      "
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: teis_backend
+    restart: always
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=${DB_USER:-teis_user}
+      - DB_PASSWORD=${DB_PASSWORD:-teis_secure_pass}
+      - DB_NAME=${DB_NAME:-teis_db}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-teis_minio_admin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-teis_minio_secret_pass}
+      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-teis-screenshots}
+      - SECRET_KEY=${SECRET_KEY}
+      - JWT_ALGORITHM=${JWT_ALGORITHM}
+      - AES_ENCRYPTION_KEY=${AES_ENCRYPTION_KEY}
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - BINANCE_USE_TESTNET=${BINANCE_USE_TESTNET}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mysql
+      - redis
+      - minio
+
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: teis_celery_worker
+    command: celery -A app.tasks.worker.celery_app worker --loglevel=info
+    restart: always
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=${DB_USER:-teis_user}
+      - DB_PASSWORD=${DB_PASSWORD:-teis_secure_pass}
+      - DB_NAME=${DB_NAME:-teis_db}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-teis_minio_admin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-teis_minio_secret_pass}
+      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-teis-screenshots}
+      - SECRET_KEY=${SECRET_KEY}
+      - JWT_ALGORITHM=${JWT_ALGORITHM}
+      - AES_ENCRYPTION_KEY=${AES_ENCRYPTION_KEY}
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - BINANCE_USE_TESTNET=${BINANCE_USE_TESTNET}
+    depends_on:
+      - mysql
+      - redis
+      - minio
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: teis_frontend
+    restart: always
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+volumes:
+  mysql_data:
+  redis_data:
+  minio_data:
