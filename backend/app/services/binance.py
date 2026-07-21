@@ -34,8 +34,9 @@ class BinanceService:
     @classmethod
     def get_position_risk(cls, db: Session):
         client = cls.get_client(db)
-        # GET /fapi/v2/positionRisk
-        return client.futures_position_information()
+        # Query GET /fapi/v2/account to retrieve position details WITH leverage key
+        acc = client.futures_account()
+        return acc.get("positions", [])
 
     @classmethod
     def get_user_trades(cls, db: Session, symbol: str, start_time: int = None):

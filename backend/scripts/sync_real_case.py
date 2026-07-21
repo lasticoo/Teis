@@ -50,8 +50,8 @@ def main():
             print(f"    Amount   : {pos['positionAmt']}")
             print(f"    Entry Px : {pos['entryPrice']}")
             print(f"    Leverage : {pos.get('leverage', 'N/A')}x")
-            print(f"    Mark Px  : {pos['markPrice']}")
-            print(f"    Unreal PnL: {pos['unRealizedProfit']} USDT")
+            print(f"    Mark Px  : {pos.get('markPrice', 'N/A')}")
+            print(f"    Unreal PnL: {pos.get('unRealizedProfit') or pos.get('unrealizedProfit', '0.0')} USDT")
 
         # Run the actual background sync function
         print("\nMenjalankan sinkronisasi database (poll_open_positions) dengan data riil...")
