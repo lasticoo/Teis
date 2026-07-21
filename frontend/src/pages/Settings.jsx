@@ -105,7 +105,7 @@ const Settings = () => {
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder={hasKey ? "••••••••••••••••••••••••••••••••" : "Masukkan API Key Binance"}
-                required
+                required={!hasKey}
                 style={styles.input}
               />
             </div>
@@ -117,7 +117,7 @@ const Settings = () => {
                 value={apiSecret}
                 onChange={(e) => setApiSecret(e.target.value)}
                 placeholder={hasKey ? "••••••••••••••••••••••••••••••••" : "Masukkan API Secret Binance"}
-                required
+                required={!hasKey}
                 style={styles.input}
               />
             </div>
