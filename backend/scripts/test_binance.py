@@ -67,16 +67,19 @@ class TestBinanceSync(unittest.TestCase):
         ]
         
         # Mock open orders (Stop Loss at 59000, Take Profit at 62000)
-        mock_get_open_orders.return_value = [
-            {
-                "type": "STOP_MARKET",
-                "stopPrice": "59000.00"
-            },
-            {
-                "type": "TAKE_PROFIT_MARKET",
-                "stopPrice": "62000.00"
-            }
-        ]
+        mock_get_open_orders.return_value = {
+            "basic": [
+                {
+                    "type": "STOP_MARKET",
+                    "stopPrice": "59000.00"
+                },
+                {
+                    "type": "TAKE_PROFIT_MARKET",
+                    "stopPrice": "62000.00"
+                }
+            ],
+            "algo": []
+        }
         
         # Run periodic poll task
         result = poll_open_positions()

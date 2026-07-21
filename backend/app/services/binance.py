@@ -69,5 +69,19 @@ class BinanceService:
     @classmethod
     def get_open_orders(cls, db: Session, symbol: str):
         client = cls.get_client(db)
-        # GET /fapi/v1/openOrders
-        return client.futures_get_open_orders(symbol=symbol)
+        
+        # Fetch standard open orders
+        try:
+            basic_orders = client.futures_get_open_orders(symbol=symbol)
+        except Exception:
+            basic_orders = []
+            
+        # Fetch conditional algo open orders
+        try:
+            algo_orders = client.futures_get_open_algo_orders()
+            # Filter algo orders for this symbol
+            algo_orders = [o for o in algo_orders if o.get("symbol") == symbol]
+        except Exception:
+            algo_orders = []
+            
+        return {"basic": basic_orders, "algo": algo_orders}

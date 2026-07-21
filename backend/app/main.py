@@ -7,6 +7,7 @@ from app.database import get_db
 
 from app.api.auth import router as auth_router, settings_router as settings_api_router
 from app.api.trades import router as trades_router
+from app.api.journal import router as journal_router
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -27,6 +28,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(settings_api_router, prefix="/api/v1")
 app.include_router(trades_router, prefix="/api/v1")
+app.include_router(journal_router, prefix="/api/v1")
 
 @app.get("/")
 def read_root():

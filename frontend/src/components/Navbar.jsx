@@ -54,11 +54,21 @@ export default function Navbar() {
         >
           Settings
         </Link>
+        <Link
+          to="/quick-tag"
+          style={location.pathname === "/quick-tag" ? styles.activeLink : styles.link}
+        >
+          Quick-Tag
+        </Link>
       </div>
 
       <div style={styles.rightSection}>
         {/* Pending tag notification indicator */}
-        <div style={styles.notificationWrapper} title={`${pendingCount} trade perlu ditag`}>
+        <div 
+          onClick={() => navigate("/quick-tag")}
+          style={styles.notificationWrapper} 
+          title={`${pendingCount} trade perlu ditag`}
+        >
           <svg
             xmlns="http://www.w3.org/2000/svg"
             viewBox="0 0 24 24"

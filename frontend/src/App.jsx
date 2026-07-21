@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import Login from "./pages/Login";
 import Verify2FA from "./pages/Verify2FA";
 import Settings from "./pages/Settings";
+import QuickTag from "./pages/QuickTag";
 import Navbar from "./components/Navbar";
 
 // Route wrapper to block unauthenticated users
@@ -43,6 +44,16 @@ function AppContent() {
           <ProtectedRoute>
             <ProtectedLayout>
               <Settings />
+            </ProtectedLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/quick-tag"
+        element={
+          <ProtectedRoute>
+            <ProtectedLayout>
+              <QuickTag />
             </ProtectedLayout>
           </ProtectedRoute>
         }

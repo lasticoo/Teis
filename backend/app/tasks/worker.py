@@ -186,8 +186,10 @@ def poll_open_positions():
 
 def update_sl_tp(db: Session, trade: Trade):
     # Fetch active orders to identify SL/TP levels
-    orders = BinanceService.get_open_orders(db, trade.pair)
-    for order in orders:
+    orders_data = BinanceService.get_open_orders(db, trade.pair)
+    
+    # 1. Process basic open orders
+    for order in orders_data.get("basic", []):
         orig_type = order.get("type", "").upper()
         stop_price = Decimal(order.get("stopPrice", "0"))
         
@@ -198,6 +200,19 @@ def update_sl_tp(db: Session, trade: Trade):
         # Take profit detection
         elif orig_type in ["TAKE_PROFIT", "TAKE_PROFIT_MARKET"] and stop_price > 0:
             trade.take_profit = stop_price
+
+    # 2. Process conditional algo open orders
+    for order in orders_data.get("algo", []):
+        order_type = order.get("orderType", "").upper()
+        trigger_price = Decimal(str(order.get("triggerPrice", "0")))
+        
+        # Stop loss detection
+        if order_type in ["STOP", "STOP_MARKET"] and trigger_price > 0:
+            trade.stop_loss = trigger_price
+            
+        # Take profit detection
+        elif order_type in ["TAKE_PROFIT", "TAKE_PROFIT_MARKET"] and trigger_price > 0:
+            trade.take_profit = trigger_price
 
 def process_fills(db: Session, trade: Trade, fills, role: str):
     processed = []
@@ -271,3 +286,24 @@ def collect_market_context(trade_id: str):
 def discover_edges():
     logger.info("Running edge discovery process...")
     return {"status": "success", "edges_discovered": 0}
+
+@celery_app.task(name="tasks.lock_trade")
+def lock_trade(trade_id: str):
+    logger.info(f"Starting lock_trade task for trade {trade_id}...")
+    db = SessionLocal()
+    try:
+        trade = db.query(Trade).filter(Trade.id == trade_id).first()
+        if trade:
+            if trade.locked_at is None:
+                trade.locked_at = datetime.now()
+                db.commit()
+                logger.info(f"Trade {trade_id} has been permanently locked.")
+            else:
+                logger.info(f"Trade {trade_id} was already locked at {trade.locked_at}.")
+        else:
+            logger.error(f"Trade {trade_id} not found to lock.")
+    except Exception as e:
+        logger.error(f"Error locking trade {trade_id}: {str(e)}")
+        db.rollback()
+    finally:
+        db.close()
