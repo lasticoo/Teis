@@ -49,7 +49,7 @@ def main():
             print(f"  - Symbol   : {pos['symbol']}")
             print(f"    Amount   : {pos['positionAmt']}")
             print(f"    Entry Px : {pos['entryPrice']}")
-            print(f"    Leverage : {pos['leverage']}x")
+            print(f"    Leverage : {pos.get('leverage', 'N/A')}x")
             print(f"    Mark Px  : {pos['markPrice']}")
             print(f"    Unreal PnL: {pos['unRealizedProfit']} USDT")
 

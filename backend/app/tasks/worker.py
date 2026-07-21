@@ -71,7 +71,8 @@ def poll_open_positions():
         # 1. Process Open Positions
         for symbol, pos in active_pos_map.items():
             pos_amt = Decimal(pos["positionAmt"])
-            leverage = Decimal(pos["leverage"])
+            leverage_val = pos.get("leverage")
+            leverage = Decimal(str(leverage_val)) if leverage_val is not None else None
             entry_price_binance = Decimal(pos["entryPrice"])
             update_time = datetime.fromtimestamp(int(pos["updateTime"]) / 1000.0, tz=timezone.utc)
 
@@ -89,7 +90,7 @@ def poll_open_positions():
             logger.info(f"New active position detected for {symbol}. Creating trade shell...")
             
             direction = "long" if pos_amt > 0 else "short"
-            margin = abs(pos_amt) * entry_price_binance / leverage
+            margin = (abs(pos_amt) * entry_price_binance / leverage) if leverage else None
 
             trade = Trade(
                 pair=symbol,
