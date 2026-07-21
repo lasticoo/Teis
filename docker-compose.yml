@@ -118,6 +118,38 @@ services:
       - redis
       - minio
 
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: teis_celery_beat
+    command: celery -A app.tasks.worker.celery_app beat --loglevel=info
+    restart: always
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=${DB_USER:-teis_user}
+      - DB_PASSWORD=${DB_PASSWORD:-teis_secure_pass}
+      - DB_NAME=${DB_NAME:-teis_db}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-teis_minio_admin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-teis_minio_secret_pass}
+      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-teis-screenshots}
+      - SECRET_KEY=${SECRET_KEY}
+      - JWT_ALGORITHM=${JWT_ALGORITHM}
+      - AES_ENCRYPTION_KEY=${AES_ENCRYPTION_KEY}
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - BINANCE_USE_TESTNET=${BINANCE_USE_TESTNET}
+    depends_on:
+      - mysql
+      - redis
+      - minio
+
   frontend:
     build:
       context: ./frontend
