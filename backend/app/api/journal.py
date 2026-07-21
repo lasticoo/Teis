@@ -130,7 +130,7 @@ def get_pending_trades(db: Session = Depends(get_db), current_user = Depends(get
             } if t.psychology else None,
             "order_type": t.execution.order_type if t.execution else None,
             "setups": [tag.taxonomy_version_id for tag in t.setup_tags] if t.setup_tags else [],
-            "screenshot_url": t.screenshots[0].file_path if t.screenshots else None
+            "screenshot_url": (t.screenshots[0].file_path.replace("minio:9000", "localhost:9000") if t.screenshots and t.screenshots[0].file_path else None)
         })
         
     return {
@@ -262,8 +262,8 @@ async def tag_trade(
                 file_name,
                 ExtraArgs={"ContentType": content_type}
             )
-            # Save S3 URL
-            screenshot_url = f"http://{settings.MINIO_ENDPOINT}/{settings.MINIO_BUCKET_NAME}/{file_name}"
+            # Save S3 URL (accessible publicly from host browser)
+            screenshot_url = f"http://localhost:9000/{settings.MINIO_BUCKET_NAME}/{file_name}"
         except Exception as e:
             logger.error(f"Failed to upload screenshot to MinIO: {str(e)}")
             raise HTTPException(

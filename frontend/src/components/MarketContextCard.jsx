@@ -96,9 +96,9 @@ export default function MarketContextCard({ tradeId, contextData: propData = nul
     }
     if (!tradeId) return;
 
-    const token = localStorage.getItem("access_token");
+    const token = localStorage.getItem("token") || localStorage.getItem("access_token");
     setLoading(true);
-    fetch(`/api/v1/journal/trade/${tradeId}/context`, {
+    fetch(`http://localhost:8000/api/v1/journal/trade/${tradeId}/context`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((res) => {
