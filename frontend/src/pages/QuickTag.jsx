@@ -306,7 +306,11 @@ const QuickTag = () => {
                     <div style={styles.tradeItemDetails}>
                       <span>Harga: {t.entry_price}</span>
                       <span>
-                        {t.is_tagged ? "🟢 Terisi (Dapat Diedit)" : "🔴 Belum Diisi"}
+                        {t.is_locked
+                          ? "🔒 Terkunci Permanen"
+                          : t.is_tagged
+                          ? "🟡 Terisi (Dalam Koreksi)"
+                          : "🔴 Belum Diisi"}
                       </span>
                     </div>
                   </div>
@@ -535,7 +539,7 @@ const QuickTag = () => {
                 </button>
               </form>
 
-              {/* ── Market Context Card ── */}
+              {/* ── Market Context Card — tampil jika sudah pernah di-tag ── */}
               {selectedTrade.is_tagged && (
                 <div style={{ marginTop: 24 }}>
                   <MarketContextCard tradeId={selectedTrade.id} />

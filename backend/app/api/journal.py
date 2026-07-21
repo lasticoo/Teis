@@ -95,20 +95,23 @@ def get_pending_trades(db: Session = Depends(get_db), current_user = Depends(get
     # Seed setup options if empty
     seed_taxonomy_if_empty(db)
     
-    # Retrieve trades where locked_at is NULL
-    trades = db.query(Trade).filter(Trade.locked_at == None).order_by(Trade.entry_time.desc()).all()
+    # Retrieve ALL active trades (tidak ada exit_time) — termasuk yang sudah terkunci (locked)
+    # agar trader tetap bisa melihat kartu Market Context dari trade yang sedang berjalan
+    trades = db.query(Trade).filter(Trade.exit_time == None).order_by(Trade.entry_time.desc()).all()
     taxonomy = db.query(SetupTaxonomyVersion).all()
     
     results = []
     for t in trades:
-        # Calculate seconds elapsed if already tagged
+        # Hitung sisa waktu koreksi jika sudah pernah di-tag
         seconds_left = None
-        if t.psychology:
-            # Correction window starts from the first save (which is created_at)
-            # Find the time elapsed
+        is_locked = t.locked_at is not None
+        
+        if t.psychology and not is_locked:
             elapsed = (datetime.now() - t.created_at).total_seconds()
             seconds_left = max(0.0, 120.0 - elapsed)
-            
+        elif is_locked:
+            seconds_left = 0  # Terkunci permanen
+
         results.append({
             "id": t.id,
             "pair": t.pair,
@@ -117,6 +120,7 @@ def get_pending_trades(db: Session = Depends(get_db), current_user = Depends(get
             "leverage": float(t.leverage) if t.leverage is not None else None,
             "entry_time": t.entry_time.isoformat(),
             "is_tagged": t.psychology is not None,
+            "is_locked": is_locked,
             "seconds_left": seconds_left,
             "psychology": {
                 "confidence_level": t.psychology.confidence_level,
@@ -139,6 +143,7 @@ def get_pending_trades(db: Session = Depends(get_db), current_user = Depends(get
             } for tax in taxonomy
         ]
     }
+
 
 @router.post("/journal/tag")
 async def tag_trade(
