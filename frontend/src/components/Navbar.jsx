@@ -49,16 +49,22 @@ export default function Navbar() {
 
       <div style={styles.navLinks}>
         <Link
-          to="/settings"
-          style={location.pathname === "/settings" ? styles.activeLink : styles.link}
+          to="/journal"
+          style={location.pathname === "/journal" ? styles.activeLink : styles.link}
         >
-          Settings
+          Daftar Jurnal
         </Link>
         <Link
           to="/quick-tag"
           style={location.pathname === "/quick-tag" ? styles.activeLink : styles.link}
         >
           Quick-Tag
+        </Link>
+        <Link
+          to="/settings"
+          style={location.pathname === "/settings" ? styles.activeLink : styles.link}
+        >
+          Settings
         </Link>
       </div>
 

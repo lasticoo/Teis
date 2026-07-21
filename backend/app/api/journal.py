@@ -145,6 +145,112 @@ def get_pending_trades(db: Session = Depends(get_db), current_user = Depends(get
     }
 
 
+@router.get("/journal/list")
+def get_journal_list(
+    data_source: Optional[str] = "all",
+    pair: Optional[str] = None,
+    status_filter: Optional[str] = "all",
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    Returns the complete list of journaled trades with filters for source (Live/Import/Manual),
+    pair, and open/closed status. Includes linked fills, PnL, RR, and market context.
+    """
+    query = db.query(Trade)
+
+    if data_source and data_source != "all":
+        query = query.filter(Trade.data_source == data_source)
+
+    if pair:
+        query = query.filter(Trade.pair == pair.upper())
+
+    if status_filter == "open":
+        query = query.filter(Trade.exit_time == None)
+    elif status_filter == "closed":
+        query = query.filter(Trade.exit_time != None)
+
+    trades = query.order_by(Trade.entry_time.desc()).all()
+
+    badge_map = {
+        "binance_sync": "Live",
+        "historical_import": "Import",
+        "manual": "Manual"
+    }
+
+    results = []
+    for t in trades:
+        # Format linked fills
+        linked_fills = []
+        for tf in t.fills:
+            ef = tf.exchange_fill
+            if ef:
+                linked_fills.append({
+                    "id": ef.id,
+                    "binance_trade_id": ef.binance_trade_id,
+                    "role": tf.role,
+                    "side": ef.side,
+                    "price": float(ef.price),
+                    "qty": float(ef.qty),
+                    "fee": float(ef.fee),
+                    "executed_at": ef.executed_at.isoformat() if ef.executed_at else None
+                })
+
+        # Format setups
+        setup_names = [tag.taxonomy_version.tag_name for tag in t.setup_tags if tag.taxonomy_version]
+
+        # Format context
+        ctx = t.market_context[0] if t.market_context else None
+        ctx_data = {
+            "trend_htf": ctx.trend_htf,
+            "trend_ltf": ctx.trend_ltf,
+            "atr": str(ctx.atr) if ctx and ctx.atr else None,
+            "volume_24h": str(ctx.volume_24h) if ctx and ctx.volume_24h else None,
+            "open_interest": str(ctx.open_interest) if ctx and ctx.open_interest else None,
+            "funding_rate": str(ctx.funding_rate) if ctx and ctx.funding_rate else None,
+            "btc_dominance": str(ctx.btc_dominance) if ctx and ctx.btc_dominance else None,
+            "fear_greed_index": ctx.fear_greed_index if ctx else None,
+            "session": ctx.session if ctx else None
+        } if ctx else None
+
+        results.append({
+            "id": t.id,
+            "pair": t.pair,
+            "direction": t.direction,
+            "entry_price": float(t.entry_price),
+            "exit_price": float(t.exit_price) if t.exit_price is not None else None,
+            "stop_loss": float(t.stop_loss) if t.stop_loss is not None else None,
+            "take_profit": float(t.take_profit) if t.take_profit is not None else None,
+            "margin": float(t.margin) if t.margin is not None else None,
+            "leverage": float(t.leverage) if t.leverage is not None else None,
+            "risk_amount": float(t.risk_amount) if t.risk_amount is not None else None,
+            "rr_planned": float(t.rr_planned) if t.rr_planned is not None else None,
+            "rr_realized": float(t.rr_realized) if t.rr_realized is not None else None,
+            "pnl": float(t.pnl) if t.pnl is not None else None,
+            "fee": float(t.fee) if t.fee is not None else None,
+            "entry_time": t.entry_time.isoformat(),
+            "exit_time": t.exit_time.isoformat() if t.exit_time else None,
+            "holding_time_sec": t.holding_time_sec,
+            "data_source": t.data_source,
+            "source_badge": badge_map.get(t.data_source, "Live"),
+            "status": "Closed" if t.exit_time else "Open",
+            "is_locked": t.locked_at is not None,
+            "is_tagged": t.psychology is not None,
+            "setups": setup_names,
+            "psychology": {
+                "confidence_level": t.psychology.confidence_level,
+                "psychological_tags": t.psychology.psychological_tags,
+                "plan_adherence": t.psychology.plan_adherence,
+                "free_notes": t.psychology.free_notes,
+            } if t.psychology else None,
+            "screenshot_url": (t.screenshots[0].file_path.replace("minio:9000", "localhost:9000") if t.screenshots and t.screenshots[0].file_path else None),
+            "fills": linked_fills,
+            "market_context": ctx_data
+        })
+
+    return {"trades": results, "total": len(results)}
+
+
 @router.post("/journal/tag")
 async def tag_trade(
     trade_id: str = Form(...),

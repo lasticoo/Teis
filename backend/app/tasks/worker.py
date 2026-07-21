@@ -11,6 +11,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.models.models import Trade, ExchangeFill, TradeFill, APICredential, MarketContext
 from app.services.binance import BinanceService
+from app.services.trade_collection import TradeCollectionService
 
 logger = logging.getLogger(__name__)
 
@@ -136,45 +137,16 @@ def poll_open_positions():
                 try:
                     start_ts = int(trade.entry_time.timestamp() * 1000) - 60000  # 1 minute before entry
                     fills = BinanceService.get_user_trades(db, pair, start_time=start_ts)
-                    exit_fills = process_fills(db, trade, fills, role="exit")
+                    process_fills(db, trade, fills, role="exit")
                     
-                    if exit_fills:
-                        # Calculate financial aggregates
-                        total_exit_qty = sum(f.qty for f in exit_fills)
-                        weighted_exit_price = sum(f.price * f.qty for f in exit_fills) / total_exit_qty if total_exit_qty > 0 else trade.entry_price
-                        
-                        trade.exit_price = weighted_exit_price
-                        trade.exit_time = max(f.executed_at for f in exit_fills)
-                        
-                        # Total realized PnL from exit fills
-                        trade.pnl = sum((Decimal(str(f.raw_payload.get("realizedPnl", "0.0"))) for f in exit_fills), Decimal("0.0"))
-                        
-                        # Total fee from all linked fills (entry & exit)
-                        all_fills = db.query(ExchangeFill).join(TradeFill).filter(TradeFill.trade_id == trade.id).all()
-                        trade.fee = sum((f.fee for f in all_fills), Decimal("0.0"))
-                        
-                        # Realized Risk-to-Reward (RR)
-                        if trade.risk_amount and trade.risk_amount > 0:
-                            trade.rr_realized = (trade.pnl - trade.fee) / trade.risk_amount
-                        else:
-                            trade.rr_realized = Decimal("0.0")
-                            
-                    else:
-                        # Fallback if no exit fills found
-                        trade.exit_price = trade.entry_price
-                        trade.exit_time = datetime.now(timezone.utc)
-                        trade.pnl = Decimal("0.0")
-                        trade.fee = Decimal("0.0")
-                        trade.rr_realized = Decimal("0.0")
-                        
+                    # Delegate VWAP, Net PnL, Fee, and Realized RR calculations to TradeCollectionService
+                    TradeCollectionService.link_trade_fills(db, trade.id)
                 except Exception as e:
                     logger.error(f"Failed to process exit fills for trade {trade.id}: {str(e)}")
-                    # Fallback on exception
                     trade.exit_price = trade.entry_price
                     trade.exit_time = datetime.now(timezone.utc)
+                    db.commit()
 
-                db.commit()
-                
                 # Trigger asynchronous task to collect market context
                 logger.info(f"Triggering market context collection for trade {trade.id}...")
                 collect_market_context.delay(trade.id)
@@ -503,5 +475,20 @@ def lock_trade(trade_id: str):
     except Exception as e:
         logger.error(f"Error locking trade {trade_id}: {str(e)}")
         db.rollback()
+    finally:
+        db.close()
+
+
+@celery_app.task(name="tasks.link_trade_fills")
+def link_trade_fills_task(trade_id: str):
+    logger.info(f"Starting Celery task link_trade_fills for trade {trade_id}...")
+    db = SessionLocal()
+    try:
+        res = TradeCollectionService.link_trade_fills(db, trade_id)
+        return res
+    except Exception as e:
+        logger.error(f"Error in link_trade_fills task for trade {trade_id}: {str(e)}")
+        db.rollback()
+        return {"status": "failed", "error": str(e)}
     finally:
         db.close()

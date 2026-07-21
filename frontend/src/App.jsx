@@ -5,6 +5,7 @@ import Login from "./pages/Login";
 import Verify2FA from "./pages/Verify2FA";
 import Settings from "./pages/Settings";
 import QuickTag from "./pages/QuickTag";
+import Journal from "./pages/Journal";
 import Navbar from "./components/Navbar";
 
 // Route wrapper to block unauthenticated users
@@ -54,6 +55,16 @@ function AppContent() {
           <ProtectedRoute>
             <ProtectedLayout>
               <QuickTag />
+            </ProtectedLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/journal"
+        element={
+          <ProtectedRoute>
+            <ProtectedLayout>
+              <Journal />
             </ProtectedLayout>
           </ProtectedRoute>
         }
