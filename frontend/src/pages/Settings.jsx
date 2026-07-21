@@ -68,12 +68,6 @@ const Settings = () => {
 
   return (
     <div style={styles.container}>
-      <div style={styles.sidebar}>
-        <div style={styles.sidebarHeader}>TEIS PANEL</div>
-        <div style={styles.sidebarItemActive}>Pengaturan</div>
-        <button onClick={logout} style={styles.logoutButton}>Keluar</button>
-      </div>
-
       <div style={styles.mainContent}>
         <h1 style={styles.pageTitle}>Pengaturan Sistem</h1>
         <p style={styles.pageSubtitle}>Konfigurasi kredensial Binance API dan preferensi keamanan Anda.</p>
@@ -139,6 +133,18 @@ const Settings = () => {
             </button>
           </form>
         </div>
+
+        <div style={styles.footer}>
+          <div style={styles.connectionStatus}>
+            <span style={hasKey ? styles.statusDotConnected : styles.statusDotDisconnected}></span>
+            <span style={styles.statusText}>
+              Koneksi API Binance Futures: <strong>{hasKey ? "Connected (Decrypted)" : "Disconnected"}</strong>
+            </span>
+          </div>
+          <div style={styles.footerText}>
+            Trading Edge Intelligence System &copy; 2026
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -147,7 +153,8 @@ const Settings = () => {
 const styles = {
   container: {
     display: "flex",
-    minHeight: "100vh",
+    flexDirection: "column",
+    minHeight: "calc(100vh - 70px)",
     backgroundColor: "#0d0a1b",
     fontFamily: "'Inter', sans-serif",
     color: "#e2e8f0",
@@ -161,48 +168,15 @@ const styles = {
     color: "#ffffff",
     fontSize: "18px",
   },
-  sidebar: {
-    width: "240px",
-    backgroundColor: "#161327",
-    borderRight: "1px solid rgba(255, 255, 255, 0.08)",
-    padding: "30px 20px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "20px",
-  },
-  sidebarHeader: {
-    fontSize: "18px",
-    fontWeight: "800",
-    color: "#00f2fe",
-    letterSpacing: "1px",
-    marginBottom: "20px",
-    textAlign: "center",
-  },
-  sidebarItemActive: {
-    backgroundColor: "rgba(124, 58, 237, 0.15)",
-    borderLeft: "4px solid #7c3aed",
-    color: "#ffffff",
-    padding: "12px 16px",
-    borderRadius: "0 8px 8px 0",
-    fontWeight: "600",
-    fontSize: "14px",
-    cursor: "pointer",
-  },
-  logoutButton: {
-    marginTop: "auto",
-    backgroundColor: "rgba(239, 68, 68, 0.1)",
-    border: "1px solid rgba(239, 68, 68, 0.3)",
-    color: "#f87171",
-    padding: "12px",
-    borderRadius: "8px",
-    cursor: "pointer",
-    fontWeight: "600",
-    transition: "background-color 0.2s",
-  },
   mainContent: {
     flex: 1,
     padding: "40px 50px",
-    overflowY: "auto",
+    maxWidth: "1200px",
+    margin: "0 auto",
+    width: "100%",
+    boxSizing: "border-box",
+    display: "flex",
+    flexDirection: "column",
   },
   pageTitle: {
     fontSize: "28px",
@@ -330,6 +304,41 @@ const styles = {
     color: "#f87171",
     fontSize: "14px",
     marginBottom: "25px",
+  },
+  footer: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: "40px",
+    paddingTop: "20px",
+    borderTop: "1px solid rgba(255, 255, 255, 0.05)",
+    color: "#94a3b8",
+    fontSize: "13px",
+  },
+  connectionStatus: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+  },
+  statusDotConnected: {
+    width: "8px",
+    height: "8px",
+    borderRadius: "50%",
+    backgroundColor: "#10b981",
+    boxShadow: "0 0 8px #10b981",
+  },
+  statusDotDisconnected: {
+    width: "8px",
+    height: "8px",
+    borderRadius: "50%",
+    backgroundColor: "#ef4444",
+    boxShadow: "0 0 8px #ef4444",
+  },
+  statusText: {
+    color: "#e2e8f0",
+  },
+  footerText: {
+    color: "#64748b",
   },
 };
 

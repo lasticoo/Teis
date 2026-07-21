@@ -4,11 +4,24 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import Login from "./pages/Login";
 import Verify2FA from "./pages/Verify2FA";
 import Settings from "./pages/Settings";
+import Navbar from "./components/Navbar";
 
 // Route wrapper to block unauthenticated users
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated } = useAuth();
   return isAuthenticated ? children : <Navigate to="/login" replace />;
+};
+
+// Protected Layout that includes Navbar
+const ProtectedLayout = ({ children }) => {
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      <Navbar />
+      <div style={{ flex: 1 }}>
+        {children}
+      </div>
+    </div>
+  );
 };
 
 function AppContent() {
@@ -28,7 +41,9 @@ function AppContent() {
         path="/settings"
         element={
           <ProtectedRoute>
-            <Settings />
+            <ProtectedLayout>
+              <Settings />
+            </ProtectedLayout>
           </ProtectedRoute>
         }
       />
