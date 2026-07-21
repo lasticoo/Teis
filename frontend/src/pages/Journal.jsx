@@ -9,9 +9,8 @@ const Journal = () => {
   const [statusFilter, setStatusFilter] = useState("all"); // 'all', 'open', 'closed'
   const [selectedTrade, setSelectedTrade] = useState(null);
 
-  const token = localStorage.getItem("token");
-
   const fetchJournalList = async () => {
+    const token = localStorage.getItem("token") || localStorage.getItem("access_token");
     setLoading(true);
     setError("");
     try {

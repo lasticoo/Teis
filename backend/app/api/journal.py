@@ -4,7 +4,7 @@ import uuid
 import boto3
 from datetime import datetime
 from decimal import Decimal
-from typing import List
+from typing import List, Optional
 from botocore.client import Config
 from fastapi import APIRouter, Depends, HTTPException, status, Form, UploadFile, File
 from sqlalchemy.orm import Session
