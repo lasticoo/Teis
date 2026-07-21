@@ -232,22 +232,6 @@ export default function MarketContextCard({ tradeId, contextData: propData = nul
   );
 }
 
-MarketContextCard.propTypes = {
-  tradeId: PropTypes.string,
-  contextData: PropTypes.shape({
-    trend_htf: PropTypes.string,
-    trend_ltf: PropTypes.string,
-    atr: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
-    volume_24h: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
-    open_interest: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
-    funding_rate: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
-    btc_dominance: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
-    fear_greed_index: PropTypes.number,
-    session: PropTypes.string,
-    captured_at: PropTypes.string,
-  }),
-};
-
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = {
   card: {
