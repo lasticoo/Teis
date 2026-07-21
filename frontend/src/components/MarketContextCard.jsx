@@ -33,12 +33,7 @@ function MetricRow({ label, value, unit = "", color }) {
   );
 }
 
-MetricRow.propTypes = {
-  label: PropTypes.string.isRequired,
-  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
-  unit: PropTypes.string,
-  color: PropTypes.string,
-};
+
 
 function TrendBadge({ label: trendKey }) {
   const cfg = TREND_CONFIG[trendKey] || TREND_CONFIG.range;
@@ -54,7 +49,7 @@ function TrendBadge({ label: trendKey }) {
   );
 }
 
-TrendBadge.propTypes = { label: PropTypes.string };
+
 
 function FearGreedBar({ value }) {
   if (value === null || value === undefined) return <span style={styles.metricValue}>—</span>;
@@ -78,7 +73,7 @@ function FearGreedBar({ value }) {
   );
 }
 
-FearGreedBar.propTypes = { value: PropTypes.number };
+
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 /**
