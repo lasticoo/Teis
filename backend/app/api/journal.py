@@ -18,12 +18,45 @@ from app.models.models import (
     TradeSetupTag, 
     TradeExecution, 
     Screenshot, 
-    SetupTaxonomyVersion
+    SetupTaxonomyVersion,
+    MarketContext
 )
-from app.tasks.worker import lock_trade
+from app.tasks.worker import lock_trade, collect_market_context
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["journal"])
+
+
+@router.get("/journal/trade/{trade_id}/context")
+def get_trade_market_context(
+    trade_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """Mengambil data market context untuk satu trade."""
+    trade = db.query(Trade).filter(Trade.id == trade_id).first()
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade tidak ditemukan.")
+
+    ctx_list = trade.market_context
+    ctx = ctx_list[0] if ctx_list else None
+
+    if not ctx:
+        return {}
+
+    return {
+        "trade_id": trade_id,
+        "trend_htf":        ctx.trend_htf,
+        "trend_ltf":        ctx.trend_ltf,
+        "atr":              str(ctx.atr) if ctx.atr else None,
+        "volume_24h":       str(ctx.volume_24h) if ctx.volume_24h else None,
+        "open_interest":    str(ctx.open_interest) if ctx.open_interest else None,
+        "funding_rate":     str(ctx.funding_rate) if ctx.funding_rate else None,
+        "btc_dominance":    str(ctx.btc_dominance) if ctx.btc_dominance else None,
+        "fear_greed_index": ctx.fear_greed_index,
+        "session":          ctx.session,
+        "captured_at":      ctx.captured_at.isoformat() if ctx.captured_at else None,
+    }
 
 def get_minio_client():
     endpoint_url = f"http://{settings.MINIO_ENDPOINT}"
@@ -311,9 +344,10 @@ async def tag_trade(
         
     db.commit()
     
-    # 10. Schedule lock task in Celery (only if this is the first save)
+    # 10. Schedule lock task in Celery and collect market context (only if this is the first save)
     if is_first_save:
         lock_trade.apply_async(args=[trade_id], countdown=120)
-        logger.info(f"Scheduled lock_trade Celery task for trade {trade_id} with 120s countdown.")
+        collect_market_context.delay(trade_id)
+        logger.info(f"Scheduled lock_trade and collect_market_context Celery tasks for trade {trade_id}.")
         
     return {"status": "success", "message": "Trade tagged successfully."}

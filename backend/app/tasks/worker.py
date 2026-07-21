@@ -1,12 +1,15 @@
 import json
 import logging
+import redis
+import requests
+import pandas as pd
 from datetime import datetime, timezone
 from decimal import Decimal
 from celery import Celery
 from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import SessionLocal
-from app.models.models import Trade, ExchangeFill, TradeFill, APICredential
+from app.models.models import Trade, ExchangeFill, TradeFill, APICredential, MarketContext
 from app.services.binance import BinanceService
 
 logger = logging.getLogger(__name__)
@@ -279,8 +282,203 @@ def trigger_notification(db: Session, trade: Trade, notif_type: str):
 
 @celery_app.task(name="tasks.collect_market_context")
 def collect_market_context(trade_id: str):
-    logger.info(f"Mock collecting market context for trade {trade_id}...")
-    return {"status": "success", "trade_id": trade_id}
+    logger.info(f"Starting market context collection for trade {trade_id}...")
+    db = SessionLocal()
+    try:
+        # 1. Fetch trade
+        trade = db.query(Trade).filter(Trade.id == trade_id).first()
+        if not trade:
+            logger.error(f"Trade {trade_id} not found for market context collection.")
+            return "failed_not_found"
+
+        # 2. Check if already has market context
+        existing_ctx = db.query(MarketContext).filter(MarketContext.trade_id == trade_id).first()
+        if existing_ctx and existing_ctx.trend_htf is not None:
+            logger.info(f"Market context for trade {trade_id} already collected.")
+            return "skipped_already_exists"
+
+        # 3. Get Binance client
+        client = BinanceService.get_client(db)
+
+        # 4. Fetch klines
+        try:
+            klines_1h = client.futures_klines(symbol=trade.pair, interval="1h", limit=100)
+            klines_4h = client.futures_klines(symbol=trade.pair, interval="4h", limit=100)
+        except Exception as e:
+            logger.error(f"Failed to fetch klines from Binance: {str(e)}")
+            klines_1h = []
+            klines_4h = []
+
+        # 5. Calculate EMA50 and Trend
+        trend_ltf = "range"
+        trend_htf = "range"
+        
+        def calculate_ema_trend(klines):
+            if len(klines) < 53:
+                return "range"
+            try:
+                closes = [float(k[4]) for k in klines]
+                df = pd.DataFrame(closes, columns=["close"])
+                df["ema50"] = df["close"].ewm(span=50, adjust=False).mean()
+                
+                last_close = closes[-1]
+                ema_last = df["ema50"].iloc[-1]
+                ema_prev1 = df["ema50"].iloc[-2]
+                ema_prev2 = df["ema50"].iloc[-3]
+                
+                slope_up = ema_last > ema_prev1 > ema_prev2
+                slope_down = ema_last < ema_prev1 < ema_prev2
+                
+                if last_close > ema_last and slope_up:
+                    return "bull"
+                elif last_close < ema_last and slope_down:
+                    return "bear"
+                else:
+                    return "range"
+            except Exception as e:
+                logger.error(f"Error calculating EMA trend: {str(e)}")
+                return "range"
+
+        trend_ltf = calculate_ema_trend(klines_1h)
+        trend_htf = calculate_ema_trend(klines_4h)
+
+        # 6. Calculate ATR-14 using 1H klines
+        atr_val = None
+        if len(klines_1h) >= 15:
+            try:
+                highs = pd.Series([float(k[2]) for k in klines_1h])
+                lows = pd.Series([float(k[3]) for k in klines_1h])
+                closes = pd.Series([float(k[4]) for k in klines_1h])
+                
+                tr1 = highs - lows
+                tr2 = (highs - closes.shift(1)).abs()
+                tr3 = (lows - closes.shift(1)).abs()
+                
+                tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+                atr_series = tr.rolling(window=14).mean()
+                atr_val = Decimal(str(round(atr_series.iloc[-1], 8)))
+            except Exception as e:
+                logger.error(f"Error calculating ATR: {str(e)}")
+
+        # 7. Fetch 24h volume from ticker
+        volume_24h_val = None
+        try:
+            ticker = client.futures_ticker(symbol=trade.pair)
+            quote_volume = ticker.get("quoteVolume", "0")
+            volume_24h_val = Decimal(quote_volume)
+        except Exception as e:
+            logger.error(f"Failed to fetch volume from Binance: {str(e)}")
+
+        # 8. Fetch Open Interest
+        open_interest_val = None
+        try:
+            oi_data = client.futures_open_interest_hist(symbol=trade.pair, period="5m", limit=1)
+            if oi_data:
+                open_interest_val = Decimal(oi_data[-1].get("sumOpenInterestValue", "0"))
+        except Exception as e:
+            logger.error(f"Failed to fetch open interest: {str(e)}")
+
+        # 9. Fetch Funding Rate
+        funding_rate_val = None
+        try:
+            fr_data = client.futures_funding_rate(symbol=trade.pair, limit=1)
+            if fr_data:
+                funding_rate_val = Decimal(fr_data[-1].get("fundingRate", "0"))
+        except Exception as e:
+            logger.error(f"Failed to fetch funding rate: {str(e)}")
+
+        # 10. Fetch external macro metrics from Redis cache (or APIs)
+        btc_dom_val = Decimal("55.0")
+        fgi_val = 50
+        
+        try:
+            r = redis.Redis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=0)
+        except Exception as e:
+            logger.error(f"Failed to connect to Redis: {str(e)}")
+            r = None
+
+        # BTC Dominance
+        btc_dom_cached = r.get("btc_dominance") if r else None
+        if btc_dom_cached:
+            btc_dom_val = Decimal(btc_dom_cached.decode("utf-8"))
+        else:
+            try:
+                res = requests.get("https://api.coingecko.com/api/v3/global", timeout=5)
+                if res.status_code == 200:
+                    data = res.json()
+                    dom = data.get("data", {}).get("market_cap_percentage", {}).get("btc", 55.0)
+                    btc_dom_val = Decimal(str(dom))
+                    if r:
+                        r.setex("btc_dominance", 3600, str(dom))
+            except Exception as e:
+                logger.error(f"Failed to fetch BTC Dominance from CoinGecko: {str(e)}")
+
+        # Fear & Greed Index
+        fgi_cached = r.get("fear_greed_index") if r else None
+        if fgi_cached:
+            fgi_val = int(fgi_cached.decode("utf-8"))
+        else:
+            try:
+                res = requests.get("https://api.alternative.me/fng/", timeout=5)
+                if res.status_code == 200:
+                    data = res.json()
+                    val = int(data.get("data", [{}])[0].get("value", 50))
+                    fgi_val = val
+                    if r:
+                        r.setex("fear_greed_index", 3600, str(val))
+            except Exception as e:
+                logger.error(f"Failed to fetch Fear & Greed Index: {str(e)}")
+
+        # 11. Save/Update Context in MySQL
+        def determine_session_from_time(dt):
+            utc_hour = dt.hour
+            if 0 <= utc_hour < 8:
+                return "asia"
+            elif 8 <= utc_hour < 16:
+                return "london"
+            else:
+                return "new_york"
+
+        session_name = determine_session_from_time(trade.entry_time)
+
+        if existing_ctx:
+            existing_ctx.trend_htf = trend_htf
+            existing_ctx.trend_ltf = trend_ltf
+            existing_ctx.atr = atr_val
+            existing_ctx.volume_24h = volume_24h_val
+            existing_ctx.btc_dominance = btc_dom_val
+            existing_ctx.fear_greed_index = fgi_val
+            existing_ctx.funding_rate = funding_rate_val
+            existing_ctx.open_interest = open_interest_val
+            existing_ctx.captured_at = datetime.now()
+            if not existing_ctx.session:
+                existing_ctx.session = session_name
+        else:
+            new_ctx = MarketContext(
+                trade_id=trade_id,
+                trend_htf=trend_htf,
+                trend_ltf=trend_ltf,
+                atr=atr_val,
+                volume_24h=volume_24h_val,
+                session=session_name,
+                btc_dominance=btc_dom_val,
+                fear_greed_index=fgi_val,
+                funding_rate=funding_rate_val,
+                open_interest=open_interest_val,
+                captured_at=datetime.now()
+            )
+            db.add(new_ctx)
+
+        db.commit()
+        logger.info(f"Successfully collected market context for trade {trade_id}.")
+        return "success"
+
+    except Exception as e:
+        logger.error(f"Exception during market context collection for trade {trade_id}: {str(e)}")
+        db.rollback()
+        return "failed_exception"
+    finally:
+        db.close()
 
 @celery_app.task(name="tasks.discover_edges")
 def discover_edges():

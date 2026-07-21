@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import MarketContextCard from "../components/MarketContextCard";
 
 const QuickTag = () => {
   const [trades, setTrades] = useState([]);
@@ -533,6 +534,13 @@ const QuickTag = () => {
                     : "Simpan & Tag Jurnal"}
                 </button>
               </form>
+
+              {/* ── Market Context Card ── */}
+              {selectedTrade.is_tagged && (
+                <div style={{ marginTop: 24 }}>
+                  <MarketContextCard tradeId={selectedTrade.id} />
+                </div>
+              )}
             </div>
           )}
         </div>
