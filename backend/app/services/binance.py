@@ -34,9 +34,29 @@ class BinanceService:
     @classmethod
     def get_position_risk(cls, db: Session):
         client = cls.get_client(db)
-        # Query GET /fapi/v2/account to retrieve position details WITH leverage key
-        acc = client.futures_account()
-        return acc.get("positions", [])
+        
+        # Fetch position risk (contains markPrice, unRealizedProfit, etc.)
+        try:
+            position_risk = client.futures_position_information()
+        except Exception as e:
+            position_risk = []
+            
+        # Fetch account positions (contains leverage)
+        try:
+            acc = client.futures_account()
+            account_positions = acc.get("positions", [])
+        except Exception:
+            account_positions = []
+            
+        # Create lookup map for leverage
+        leverage_map = {p["symbol"]: p.get("leverage") for p in account_positions}
+        
+        # Merge leverage into position risk items
+        for pos in position_risk:
+            symbol = pos["symbol"]
+            pos["leverage"] = leverage_map.get(symbol)
+            
+        return position_risk
 
     @classmethod
     def get_user_trades(cls, db: Session, symbol: str, start_time: int = None):
