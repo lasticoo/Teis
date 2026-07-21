@@ -5,6 +5,8 @@ from sqlalchemy import text
 from app.config import settings
 from app.database import get_db
 
+from app.api.auth import router as auth_router, settings_router as settings_api_router
+
 app = FastAPI(
     title=settings.APP_NAME,
     description="Backend API for Trading Edge Intelligence System (TEIS)",
@@ -19,6 +21,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include routers
+app.include_router(auth_router, prefix="/api/v1")
+app.include_router(settings_api_router, prefix="/api/v1")
 
 @app.get("/")
 def read_root():

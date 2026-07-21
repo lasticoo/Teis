@@ -44,6 +44,18 @@ class Settings(BaseSettings):
     BINANCE_API_SECRET: str = Field(default="")
     BINANCE_USE_TESTNET: bool = True
 
+    # SMTP Configuration
+    SMTP_HOST: str = Field(default="localhost")
+    SMTP_PORT: int = Field(default=1025)
+    SMTP_USER: str = Field(default="")
+    SMTP_PASSWORD: str = Field(default="")
+    SMTP_FROM_EMAIL: str = Field(default="noreply@teis.local")
+
+    # Web Push (VAPID) Configuration
+    VAPID_PUBLIC_KEY: str = Field(default="")
+    VAPID_PRIVATE_KEY: str = Field(default="")
+    VAPID_ADMIN_EMAIL: str = Field(default="admin@teis.local")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

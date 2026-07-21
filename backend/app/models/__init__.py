@@ -11,5 +11,7 @@ from app.models.models import (
     Psychology,
     Screenshot,
     TradeCorrection,
-    EdgeBlueprint
+    EdgeBlueprint,
+    User,
+    APICredential
 )

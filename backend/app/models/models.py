@@ -14,6 +14,7 @@ from sqlalchemy import (
     UniqueConstraint,
     CheckConstraint,
     FetchedValue,
+    Index,
     func
 )
 from sqlalchemy.orm import relationship
@@ -45,7 +46,7 @@ class Trade(Base):
     # Generated column representation in SQLAlchemy
     holding_time_sec = Column(Integer, FetchedValue())
     
-    data_source = Column(Enum('manual', 'binance_sync'), nullable=False)
+    data_source = Column(Enum('manual', 'binance_sync', 'historical_import'), nullable=False)
     locked_at = Column(DateTime(timezone=False), nullable=True)
     created_at = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
 
@@ -218,3 +219,65 @@ class EdgeBlueprint(Base):
     status = Column(Enum('learning', 'research', 'validation', 'production', 'monitoring'), nullable=False, default='learning')
     created_at = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=False), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class SystemNotification(Base):
+    __tablename__ = 'system_notifications'
+    __table_args__ = (
+        Index('idx_notif_type_sent', 'type', 'sent_at'),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    type = Column(Enum('trade_pending_tag', 'edge_status_change', 'sync_failure'), nullable=False)
+    reference_id = Column(String(36), nullable=True)  # trade_id or edge_blueprint_id
+    channel = Column(Enum('in_app', 'web_push', 'email'), nullable=False)
+    message = Column(Text, nullable=False)
+    sent_at = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
+    acknowledged_at = Column(DateTime(timezone=False), nullable=True)
+
+
+class EquitySnapshot(Base):
+    __tablename__ = 'equity_snapshots'
+    __table_args__ = (
+        Index('idx_equity_time', 'captured_at'),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    balance = Column(Numeric(20, 8), nullable=False)
+    unrealized_pnl = Column(Numeric(20, 8), nullable=False)
+    captured_at = Column(DateTime(timezone=False), nullable=False)
+
+
+class AccountTransfer(Base):
+    __tablename__ = 'account_transfers'
+    __table_args__ = (
+        Index('idx_transfer_time', 'occurred_at'),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    amount = Column(Numeric(20, 8), nullable=False)  # positive = deposit, negative = withdrawal
+    asset = Column(String(10), nullable=False)
+    occurred_at = Column(DateTime(timezone=False), nullable=False)
+    binance_transfer_ref = Column(String(100), nullable=True)
+
+
+class User(Base):
+    __tablename__ = 'users'
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    username = Column(String(50), unique=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    totp_secret = Column(String(100), nullable=True)
+    created_at = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
+
+
+class APICredential(Base):
+    __tablename__ = 'api_credentials'
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    service_name = Column(String(50), unique=True, nullable=False)
+    encrypted_api_key = Column(String(500), nullable=False)
+    encrypted_api_secret = Column(String(500), nullable=False)
+    created_at = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
+
+
