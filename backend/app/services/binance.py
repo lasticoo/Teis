@@ -20,6 +20,15 @@ class BinanceService:
             
         # Initialize python-binance client (configured for Testnet if enabled)
         client = Client(api_key, api_secret, testnet=settings.BINANCE_USE_TESTNET)
+        
+        # Synchronize local time with Binance server time to prevent clock drift issues (APIError code -1021)
+        import time
+        try:
+            server_time = client.get_server_time()
+            client.timestamp_offset = server_time['serverTime'] - int(time.time() * 1000)
+        except Exception:
+            pass
+            
         return client
 
     @classmethod
