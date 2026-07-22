@@ -371,6 +371,7 @@ const TradeDetail = () => {
               stage="before_entry"
               stageLabel="1. Sebelum Entry (Before Entry)"
               currentImageUrl={trade.screenshots?.find((s) => s.stage === "before_entry")?.url}
+              isLocked={trade.is_locked}
               onUploadSuccess={fetchTradeDetail}
             />
 
@@ -379,6 +380,7 @@ const TradeDetail = () => {
               stage="during_trade"
               stageLabel="2. Saat Trade (During Trade)"
               currentImageUrl={trade.screenshots?.find((s) => s.stage === "during_trade")?.url}
+              isLocked={trade.is_locked}
               onUploadSuccess={fetchTradeDetail}
             />
 
@@ -387,6 +389,7 @@ const TradeDetail = () => {
               stage="exit"
               stageLabel="3. Setelah Exit (After Exit)"
               currentImageUrl={trade.screenshots?.find((s) => s.stage === "exit")?.url}
+              isLocked={trade.is_locked}
               onUploadSuccess={fetchTradeDetail}
             />
           </div>

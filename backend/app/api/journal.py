@@ -721,6 +721,13 @@ async def upload_screenshot(
             detail=f"Stage '{stage}' tidak valid. Pilih salah satu dari {allowed_stages}."
         )
 
+    # 2b. Immutability check: 'before_entry' screenshot cannot be modified directly if trade is locked
+    if stage == "before_entry" and trade.locked_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Screenshot 'Sebelum Entry' (before_entry) telah terkunci secara imutabel. Perubahan hanya dapat dilakukan melalui fitur Ajukan Koreksi."
+        )
+
     # 3. Read file content & validate size (< 5MB)
     image_bytes = await file.read()
     max_size = 5 * 1024 * 1024  # 5MB

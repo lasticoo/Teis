@@ -5,6 +5,7 @@ const ImageUploader = ({
   stage = "before_entry",
   stageLabel = "Chart Screenshot",
   currentImageUrl = null,
+  isLocked = false,
   onUploadSuccess,
 }) => {
   const [dragActive, setDragActive] = useState(false);
@@ -12,6 +13,8 @@ const ImageUploader = ({
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const [previewUrl, setPreviewUrl] = useState(currentImageUrl);
+
+  const isBeforeEntryLocked = stage === "before_entry" && isLocked;
 
   useEffect(() => {
     if (currentImageUrl) {
@@ -25,6 +28,12 @@ const ImageUploader = ({
 
   const handleFileSelect = async (file) => {
     if (!file) return;
+
+    // Prevent direct upload for before_entry stage if trade is locked
+    if (isBeforeEntryLocked) {
+      setError("❌ Screenshot 'Sebelum Entry' terkunci secara imutabel. Perubahan harus via Ajukan Koreksi.");
+      return;
+    }
 
     setError("");
     setSuccessMsg("");
@@ -66,7 +75,7 @@ const ImageUploader = ({
       }
 
       setSuccessMsg("✅ WebP 80% terkompresi & berhasil diunggah ke MinIO S3!");
-      
+
       const rawUrl = data.screenshot?.url || URL.createObjectURL(file);
       const cacheBustedUrl = rawUrl.includes("?")
         ? `${rawUrl}&t=${Date.now()}`
@@ -87,6 +96,7 @@ const ImageUploader = ({
   const handleDrag = (e) => {
     e.preventDefault();
     e.stopPropagation();
+    if (isBeforeEntryLocked) return;
     if (e.type === "dragenter" || e.type === "dragover") {
       setDragActive(true);
     } else if (e.type === "dragleave") {
@@ -98,6 +108,10 @@ const ImageUploader = ({
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
+    if (isBeforeEntryLocked) {
+      setError("❌ Screenshot 'Sebelum Entry' terkunci secara imutabel. Perubahan harus via Ajukan Koreksi.");
+      return;
+    }
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       handleFileSelect(e.dataTransfer.files[0]);
     }
@@ -113,7 +127,11 @@ const ImageUploader = ({
     <div style={styles.container}>
       <div style={styles.headerRow}>
         <span style={styles.label}>{stageLabel}</span>
-        <span style={styles.maxSizeHint}>Max 5MB • WebP 80% Auto Compress</span>
+        {isBeforeEntryLocked ? (
+          <span style={styles.lockedBadge}>🔒 Terkunci (Imutabel)</span>
+        ) : (
+          <span style={styles.maxSizeHint}>Max 5MB • WebP 80% Auto Compress</span>
+        )}
       </div>
 
       {error && <div style={styles.errorBox}>{error}</div>}
@@ -142,15 +160,21 @@ const ImageUploader = ({
             >
               🔍 Open Full
             </button>
-            <label style={styles.reuploadBtn}>
-              📷 Ganti Gambar
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleChange}
-                style={{ display: "none" }}
-              />
-            </label>
+            {isBeforeEntryLocked ? (
+              <span style={styles.lockedBtnHint}>
+                🔒 Perubahan via Ajukan Koreksi
+              </span>
+            ) : (
+              <label style={styles.reuploadBtn}>
+                📷 Ganti Gambar
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleChange}
+                  style={{ display: "none" }}
+                />
+              </label>
+            )}
           </div>
         </div>
       ) : (
@@ -159,25 +183,36 @@ const ImageUploader = ({
           style={{
             ...styles.dropzone,
             ...(dragActive ? styles.dropzoneActive : {}),
+            ...(isBeforeEntryLocked ? styles.dropzoneDisabled : {}),
           }}
           onDragEnter={handleDrag}
           onDragLeave={handleDrag}
           onDragOver={handleDrag}
           onDrop={handleDrop}
         >
-          <label style={styles.dropzoneContent}>
-            <span style={styles.uploadIcon}>📁</span>
-            <span style={styles.dropText}>
-              Drag & Drop file gambar di sini, atau <span style={styles.browseLink}>Pilih File</span>
-            </span>
-            <span style={styles.subDropText}>Format yang didukung: PNG, JPG, WEBP (Max 5MB)</span>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleChange}
-              style={{ display: "none" }}
-            />
-          </label>
+          {isBeforeEntryLocked ? (
+            <div style={styles.dropzoneContentDisabled}>
+              <span style={styles.uploadIcon}>🔒</span>
+              <span style={styles.dropText}>Screenshot Sebelum Entry Terkunci</span>
+              <span style={styles.subDropText}>
+                Imutabilitas aktif. Perubahan data harus diajukan via menu Ajukan Koreksi.
+              </span>
+            </div>
+          ) : (
+            <label style={styles.dropzoneContent}>
+              <span style={styles.uploadIcon}>📁</span>
+              <span style={styles.dropText}>
+                Drag & Drop file gambar di sini, atau <span style={styles.browseLink}>Pilih File</span>
+              </span>
+              <span style={styles.subDropText}>Format yang didukung: PNG, JPG, WEBP (Max 5MB)</span>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleChange}
+                style={{ display: "none" }}
+              />
+            </label>
+          )}
         </div>
       )}
     </div>
@@ -208,6 +243,15 @@ const styles = {
     fontSize: "11px",
     color: "#64748b",
   },
+  lockedBadge: {
+    fontSize: "11px",
+    fontWeight: "700",
+    color: "#f87171",
+    backgroundColor: "rgba(239, 68, 68, 0.15)",
+    border: "1px solid rgba(239, 68, 68, 0.3)",
+    padding: "2px 8px",
+    borderRadius: "4px",
+  },
   errorBox: {
     backgroundColor: "rgba(239, 68, 68, 0.15)",
     border: "1px solid rgba(239, 68, 68, 0.3)",
@@ -233,6 +277,11 @@ const styles = {
     cursor: "pointer",
     transition: "all 0.2s ease",
   },
+  dropzoneDisabled: {
+    borderColor: "rgba(239, 68, 68, 0.3)",
+    backgroundColor: "rgba(239, 68, 68, 0.03)",
+    cursor: "not-allowed",
+  },
   dropzoneActive: {
     borderColor: "#7c3aed",
     backgroundColor: "rgba(124, 58, 237, 0.12)",
@@ -243,6 +292,13 @@ const styles = {
     alignItems: "center",
     gap: "6px",
     cursor: "pointer",
+  },
+  dropzoneContentDisabled: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "6px",
+    cursor: "not-allowed",
   },
   uploadIcon: {
     fontSize: "24px",
@@ -325,6 +381,16 @@ const styles = {
     fontSize: "11px",
     fontWeight: "700",
     cursor: "pointer",
+  },
+  lockedBtnHint: {
+    backgroundColor: "rgba(239, 68, 68, 0.8)",
+    color: "#ffffff",
+    border: "1px solid rgba(255, 255, 255, 0.2)",
+    padding: "6px 12px",
+    borderRadius: "6px",
+    fontSize: "11px",
+    fontWeight: "700",
+    cursor: "not-allowed",
   },
 };
 
