@@ -13,6 +13,13 @@ const TradeDetail = () => {
   const [zoomedImage, setZoomedImage] = useState(null);
   const [isCorrectionModalOpen, setIsCorrectionModalOpen] = useState(false);
 
+  // Position update form state
+  const [posForm, setPosForm] = useState({ stop_loss: "", take_profit: "", fee: "" });
+  const [closeForm, setCloseForm] = useState({ exit_price: "", fee: "", exit_reason: "take_profit" });
+  const [posMsg, setPosMsg] = useState("");
+  const [posErr, setPosErr] = useState("");
+  const [posLoading, setPosLoading] = useState(false);
+
   const fetchTradeDetail = async () => {
     const token = localStorage.getItem("token") || localStorage.getItem("access_token");
     setLoading(true);
@@ -45,6 +52,39 @@ const TradeDetail = () => {
       fetchTradeDetail();
     }
   }, [tradeId]);
+
+  // Sync form state when trade loads
+  useEffect(() => {
+    if (trade) {
+      setPosForm({
+        stop_loss: trade.stop_loss != null ? String(trade.stop_loss) : "",
+        take_profit: trade.take_profit != null ? String(trade.take_profit) : "",
+        fee: trade.fee != null ? String(trade.fee) : "",
+      });
+    }
+  }, [trade]);
+
+  const updatePosition = async (payload) => {
+    setPosErr("");
+    setPosMsg("");
+    setPosLoading(true);
+    const token = localStorage.getItem("token") || localStorage.getItem("access_token");
+    try {
+      const res = await fetch("http://localhost:8000/api/v1/journal/update-trade", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ trade_id: tradeId, ...payload }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Gagal memperbarui data trade.");
+      setPosMsg("✅ " + data.message);
+      await fetchTradeDetail();
+    } catch (err) {
+      setPosErr("❌ " + err.message);
+    } finally {
+      setPosLoading(false);
+    }
+  };
 
   const formatHoldingTime = (sec) => {
     if (sec === null || sec === undefined) return "—";
@@ -179,7 +219,7 @@ const TradeDetail = () => {
           </div>
         </div>
 
-        {/* Summary Metric Cards */}
+        {/* Summary Metric Cards — Row 1 */}
         <div style={styles.metricGrid}>
           <div style={styles.metricCard}>
             <span style={styles.metricLabel}>ENTRY VWAP</span>
@@ -192,23 +232,59 @@ const TradeDetail = () => {
             </span>
           </div>
           <div style={styles.metricCard}>
+            <span style={styles.metricLabel}>STOP LOSS</span>
+            <span style={{ ...styles.metricValue, color: trade.stop_loss ? "#f87171" : "#64748b" }}>
+              {trade.stop_loss ? `$${trade.stop_loss.toFixed(4)}` : "—"}
+            </span>
+          </div>
+          <div style={styles.metricCard}>
+            <span style={styles.metricLabel}>TAKE PROFIT</span>
+            <span style={{ ...styles.metricValue, color: trade.take_profit ? "#34d399" : "#64748b" }}>
+              {trade.take_profit ? `$${trade.take_profit.toFixed(4)}` : "—"}
+            </span>
+          </div>
+          <div style={styles.metricCard}>
+            <span style={styles.metricLabel}>RR RENCANA</span>
+            <span style={{ ...styles.metricValue, color: trade.rr_planned ? "#a78bfa" : "#64748b" }}>
+              {trade.rr_planned ? `${trade.rr_planned.toFixed(2)}R` : "—"}
+            </span>
+          </div>
+        </div>
+        {/* Summary Metric Cards — Row 2 */}
+        <div style={{ ...styles.metricGrid, marginTop: "8px" }}>
+          <div style={styles.metricCard}>
             <span style={styles.metricLabel}>REALIZED RR</span>
             <span style={{
               ...styles.metricValue,
-              color: trade.rr_realized === null ? "#ffffff" : trade.rr_realized >= 0 ? "#22c55e" : "#ef4444"
+              color: trade.rr_realized === null ? "#64748b" : trade.rr_realized >= 0 ? "#22c55e" : "#ef4444"
             }}>
               {trade.rr_realized !== null ? `${trade.rr_realized.toFixed(2)}R` : "—"}
             </span>
           </div>
           <div style={styles.metricCard}>
             <span style={styles.metricLabel}>TOTAL FEE</span>
-            <span style={styles.metricValue}>
+            <span style={{ ...styles.metricValue, color: trade.fee !== null ? "#fbbf24" : "#64748b" }}>
               {trade.fee !== null ? `$${trade.fee.toFixed(4)}` : "—"}
             </span>
           </div>
           <div style={styles.metricCard}>
             <span style={styles.metricLabel}>HOLDING TIME</span>
             <span style={styles.metricValue}>{formatHoldingTime(trade.holding_time_sec)}</span>
+          </div>
+          <div style={styles.metricCard}>
+            <span style={styles.metricLabel}>NET PnL</span>
+            <span style={{
+              ...styles.metricValue,
+              color: trade.pnl === null ? "#64748b" : trade.pnl >= 0 ? "#22c55e" : "#ef4444"
+            }}>
+              {trade.pnl === null ? "—" : trade.pnl >= 0 ? `+$${trade.pnl.toFixed(2)}` : `-$${Math.abs(trade.pnl).toFixed(2)}`}
+            </span>
+          </div>
+          <div style={styles.metricCard}>
+            <span style={styles.metricLabel}>STATUS</span>
+            <span style={{ ...styles.metricValue, color: trade.status === "Closed" ? "#94a3b8" : "#34d399", fontSize: "14px" }}>
+              {trade.status === "Closed" ? "● Closed" : "● Open"}
+            </span>
           </div>
         </div>
 
@@ -268,6 +344,18 @@ const TradeDetail = () => {
                 <div style={styles.execCardItem}>
                   <span style={styles.execLabel}>Tipe Order:</span>
                   <span style={styles.execValue}>{trade.execution.order_type.toUpperCase()}</span>
+                </div>
+                <div style={styles.execCardItem}>
+                  <span style={styles.execLabel}>RR Rencana:</span>
+                  <span style={{ ...styles.execValue, color: trade.rr_planned ? "#a78bfa" : "#64748b" }}>
+                    {trade.rr_planned ? `${trade.rr_planned.toFixed(2)}R` : "—"}
+                  </span>
+                </div>
+                <div style={styles.execCardItem}>
+                  <span style={styles.execLabel}>RR Realized:</span>
+                  <span style={{ ...styles.execValue, color: trade.rr_realized !== null ? (trade.rr_realized >= 0 ? "#22c55e" : "#ef4444") : "#64748b" }}>
+                    {trade.rr_realized !== null ? `${trade.rr_realized.toFixed(2)}R` : "—"}
+                  </span>
                 </div>
                 <div style={styles.execCardItem}>
                   <span style={styles.execLabel}>Moved to Breakeven (BE):</span>
@@ -355,6 +443,119 @@ const TradeDetail = () => {
           </div>
           <MarketContextCard contextData={trade.market_context} tradeId={trade.id} />
         </div>
+
+        {/* Section 3b: Manual Position Update Form (only for Open, unlocked trades) */}
+        {trade.status === "Open" && !trade.is_locked && (
+          <div style={styles.sectionCard}>
+            <div style={styles.sectionHeader}>
+              <h3 style={styles.sectionTitle}>📐 Update Posisi Manual</h3>
+              <span style={styles.sectionSubtitle}>Isi SL/TP rencana atau tutup posisi manual (sebelum dikunci otomatis)</span>
+            </div>
+
+            {posErr && <div style={styles.formError}>{posErr}</div>}
+            {posMsg && <div style={styles.formSuccess}>{posMsg}</div>}
+
+            {/* SL/TP Setter */}
+            <div style={styles.posFormGrid}>
+              <div style={styles.posFormGroup}>
+                <label style={styles.posLabel}>Stop Loss (SL) — harga</label>
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="Contoh: 63000"
+                  value={posForm.stop_loss}
+                  onChange={(e) => setPosForm((p) => ({ ...p, stop_loss: e.target.value }))}
+                  style={styles.posInput}
+                />
+              </div>
+              <div style={styles.posFormGroup}>
+                <label style={styles.posLabel}>Take Profit (TP) — harga</label>
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="Contoh: 67000"
+                  value={posForm.take_profit}
+                  onChange={(e) => setPosForm((p) => ({ ...p, take_profit: e.target.value }))}
+                  style={styles.posInput}
+                />
+              </div>
+              <div style={styles.posFormGroup}>
+                <label style={styles.posLabel}>Total Fee (opsional)</label>
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="Contoh: 1.50"
+                  value={posForm.fee}
+                  onChange={(e) => setPosForm((p) => ({ ...p, fee: e.target.value }))}
+                  style={styles.posInput}
+                />
+              </div>
+            </div>
+            <button
+              style={{ ...styles.posBtn, opacity: posLoading ? 0.6 : 1 }}
+              disabled={posLoading}
+              onClick={() => updatePosition({
+                stop_loss: posForm.stop_loss ? parseFloat(posForm.stop_loss) : undefined,
+                take_profit: posForm.take_profit ? parseFloat(posForm.take_profit) : undefined,
+                fee: posForm.fee ? parseFloat(posForm.fee) : undefined,
+              })}
+            >
+              {posLoading ? "Menyimpan..." : "💾 Simpan SL / TP"}
+            </button>
+
+            {/* Close Position Form */}
+            <div style={styles.divider} />
+            <h4 style={{ ...styles.subCardTitle, marginBottom: "12px" }}>🔒 Tutup Posisi Manual</h4>
+            <div style={styles.posFormGrid}>
+              <div style={styles.posFormGroup}>
+                <label style={styles.posLabel}>Exit Price (harga keluar) *</label>
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="Contoh: 66500"
+                  value={closeForm.exit_price}
+                  onChange={(e) => setCloseForm((p) => ({ ...p, exit_price: e.target.value }))}
+                  style={styles.posInput}
+                />
+              </div>
+              <div style={styles.posFormGroup}>
+                <label style={styles.posLabel}>Total Fee Exit (opsional)</label>
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="Contoh: 2.00"
+                  value={closeForm.fee}
+                  onChange={(e) => setCloseForm((p) => ({ ...p, fee: e.target.value }))}
+                  style={styles.posInput}
+                />
+              </div>
+              <div style={styles.posFormGroup}>
+                <label style={styles.posLabel}>Alasan Exit</label>
+                <select
+                  value={closeForm.exit_reason}
+                  onChange={(e) => setCloseForm((p) => ({ ...p, exit_reason: e.target.value }))}
+                  style={styles.posSelect}
+                >
+                  <option value="take_profit">Take Profit (TP Hit)</option>
+                  <option value="stop_loss">Stop Loss (SL Hit)</option>
+                  <option value="manual_close">Manual Close</option>
+                  <option value="breakeven">Breakeven (BE)</option>
+                </select>
+              </div>
+            </div>
+            <button
+              style={{ ...styles.posBtnClose, opacity: posLoading || !closeForm.exit_price ? 0.5 : 1 }}
+              disabled={posLoading || !closeForm.exit_price}
+              onClick={() => updatePosition({
+                exit_price: parseFloat(closeForm.exit_price),
+                fee: closeForm.fee ? parseFloat(closeForm.fee) : undefined,
+                exit_reason: closeForm.exit_reason,
+              })}
+            >
+              {posLoading ? "Memproses..." : "✅ Tutup Posisi & Hitung PnL / RR"}
+            </button>
+          </div>
+        )}
 
         {/* Section 4: Screenshot & Catatan */}
         <div style={styles.sectionCard}>
@@ -954,6 +1155,92 @@ const styles = {
     padding: "30px",
     borderRadius: "14px",
     textAlign: "center",
+  },
+  formError: {
+    backgroundColor: "rgba(239, 68, 68, 0.1)",
+    border: "1px solid rgba(239, 68, 68, 0.25)",
+    borderRadius: "8px",
+    color: "#f87171",
+    padding: "10px 14px",
+    fontSize: "13px",
+    marginBottom: "12px",
+  },
+  formSuccess: {
+    backgroundColor: "rgba(16, 185, 129, 0.1)",
+    border: "1px solid rgba(16, 185, 129, 0.25)",
+    borderRadius: "8px",
+    color: "#34d399",
+    padding: "10px 14px",
+    fontSize: "13px",
+    marginBottom: "12px",
+  },
+  posFormGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+    gap: "14px",
+    marginBottom: "16px",
+  },
+  posFormGroup: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+  },
+  posLabel: {
+    fontSize: "12px",
+    fontWeight: "600",
+    color: "#94a3b8",
+    letterSpacing: "0.3px",
+  },
+  posInput: {
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    border: "1px solid rgba(255, 255, 255, 0.12)",
+    borderRadius: "8px",
+    color: "#e2e8f0",
+    padding: "9px 12px",
+    fontSize: "14px",
+    outline: "none",
+    transition: "border-color 0.2s",
+    width: "100%",
+    boxSizing: "border-box",
+  },
+  posSelect: {
+    backgroundColor: "rgba(15, 12, 30, 0.9)",
+    border: "1px solid rgba(255, 255, 255, 0.12)",
+    borderRadius: "8px",
+    color: "#e2e8f0",
+    padding: "9px 12px",
+    fontSize: "14px",
+    outline: "none",
+    width: "100%",
+    cursor: "pointer",
+  },
+  posBtn: {
+    backgroundColor: "rgba(124, 58, 237, 0.8)",
+    color: "#ffffff",
+    border: "1px solid rgba(124, 58, 237, 0.5)",
+    padding: "10px 22px",
+    borderRadius: "8px",
+    fontSize: "13px",
+    fontWeight: "700",
+    cursor: "pointer",
+    transition: "all 0.2s",
+    marginBottom: "8px",
+  },
+  posBtnClose: {
+    backgroundColor: "rgba(16, 185, 129, 0.15)",
+    color: "#34d399",
+    border: "1px solid rgba(16, 185, 129, 0.35)",
+    padding: "10px 22px",
+    borderRadius: "8px",
+    fontSize: "13px",
+    fontWeight: "700",
+    cursor: "pointer",
+    transition: "all 0.2s",
+  },
+  divider: {
+    height: "1px",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    margin: "20px 0",
   },
 };
 

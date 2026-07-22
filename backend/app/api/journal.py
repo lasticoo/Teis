@@ -689,6 +689,136 @@ def submit_trade_correction(
         )
 
 
+class UpdateTradeRequest(BaseModel):
+    trade_id: str
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    exit_price: Optional[float] = None
+    fee: Optional[float] = None
+    exit_reason: Optional[str] = None  # take_profit, stop_loss, manual_close, breakeven
+    exit_time: Optional[str] = None    # ISO string, if not provided and exit_price is given, uses now()
+
+
+@router.patch("/journal/update-trade")
+def update_trade_manual(
+    request: UpdateTradeRequest,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    Updates manual trade fields (SL, TP, exit price, fee, exit reason) for an unlocked trade.
+    Automatically calculates:
+    - rr_planned from SL/TP/entry_price
+    - rr_realized from exit_price/entry_price/stop_loss
+    Only allowed when trade is NOT locked (locked_at IS NULL).
+    """
+    trade = db.query(Trade).filter(Trade.id == request.trade_id).first()
+    if not trade:
+        raise HTTPException(status_code=404, detail=f"Trade {request.trade_id} tidak ditemukan.")
+
+    if trade.locked_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Trade sudah terkunci. Gunakan Ajukan Koreksi untuk mengubah data."
+        )
+
+    # Determine effective entry price
+    entry = float(trade.entry_price)
+    direction = trade.direction  # 'long' or 'short'
+
+    # Update SL
+    if request.stop_loss is not None:
+        trade.stop_loss = Decimal(str(request.stop_loss))
+
+    # Update TP
+    if request.take_profit is not None:
+        trade.take_profit = Decimal(str(request.take_profit))
+
+    # Auto-calculate rr_planned if we have both SL and TP
+    sl = float(trade.stop_loss) if trade.stop_loss else None
+    tp = float(trade.take_profit) if trade.take_profit else None
+    if sl is not None and tp is not None and sl != entry:
+        risk = abs(entry - sl)
+        reward = abs(tp - entry)
+        if risk > 0:
+            trade.rr_planned = Decimal(str(round(reward / risk, 2)))
+
+    # Update exit fields (closing a position)
+    if request.exit_price is not None:
+        trade.exit_price = Decimal(str(request.exit_price))
+
+        # Determine exit_time
+        if request.exit_time:
+            try:
+                trade.exit_time = datetime.fromisoformat(request.exit_time)
+            except Exception:
+                trade.exit_time = datetime.now()
+        else:
+            trade.exit_time = datetime.now()
+
+        # Calculate PnL and realized RR
+        exit_p = float(trade.exit_price)
+        qty = float(trade.margin) / entry if trade.margin else 1.0
+        if direction == "long":
+            raw_pnl = (exit_p - entry) * qty
+        else:
+            raw_pnl = (entry - exit_p) * qty
+
+        # Subtract fees
+        total_fee = float(request.fee) if request.fee is not None else (float(trade.fee) if trade.fee else 0.0)
+        net_pnl = raw_pnl - total_fee
+
+        trade.pnl = Decimal(str(round(net_pnl, 8)))
+
+        # Update fee if provided
+        if request.fee is not None:
+            trade.fee = Decimal(str(request.fee))
+
+        # Calculate realized RR
+        current_sl = float(trade.stop_loss) if trade.stop_loss else None
+        if current_sl is not None and abs(entry - current_sl) > 0:
+            risk = abs(entry - current_sl)
+            if direction == "long":
+                rr = (exit_p - entry) / risk
+            else:
+                rr = (entry - exit_p) / risk
+            trade.rr_realized = Decimal(str(round(rr, 2)))
+
+        # Update exit_reason on trade_execution
+        exec_rec = trade.execution
+        if exec_rec and request.exit_reason:
+            allowed_reasons = ["take_profit", "stop_loss", "manual_close", "breakeven"]
+            if request.exit_reason in allowed_reasons:
+                exec_rec.exit_reason = request.exit_reason
+
+    elif request.fee is not None:
+        # Fee update without closing
+        trade.fee = Decimal(str(request.fee))
+
+    db.commit()
+    db.refresh(trade)
+
+    logger.info(f"Trade {trade.id} updated manually: SL={trade.stop_loss}, TP={trade.take_profit}, exit={trade.exit_price}, pnl={trade.pnl}")
+
+    return {
+        "status": "success",
+        "message": "Data posisi trade berhasil diperbarui.",
+        "trade": {
+            "id": trade.id,
+            "stop_loss": float(trade.stop_loss) if trade.stop_loss else None,
+            "take_profit": float(trade.take_profit) if trade.take_profit else None,
+            "rr_planned": float(trade.rr_planned) if trade.rr_planned else None,
+            "exit_price": float(trade.exit_price) if trade.exit_price else None,
+            "exit_time": trade.exit_time.isoformat() if trade.exit_time else None,
+            "pnl": float(trade.pnl) if trade.pnl is not None else None,
+            "fee": float(trade.fee) if trade.fee is not None else None,
+            "rr_realized": float(trade.rr_realized) if trade.rr_realized is not None else None,
+            "holding_time_sec": trade.holding_time_sec,
+            "status": "Closed" if trade.exit_time else "Open"
+        }
+    }
+
+
 @router.post("/screenshots/upload")
 async def upload_screenshot(
     trade_id: str = Form(...),
@@ -960,6 +1090,8 @@ def get_trade_detail(
         "direction": trade.direction,
         "entry_price": float(trade.entry_price),
         "exit_price": float(trade.exit_price) if trade.exit_price else None,
+        "stop_loss": float(trade.stop_loss) if trade.stop_loss else None,
+        "take_profit": float(trade.take_profit) if trade.take_profit else None,
         "pnl": float(trade.pnl) if trade.pnl is not None else None,
         "fee": float(trade.fee) if trade.fee is not None else None,
         "risk_amount": float(trade.risk_amount) if trade.risk_amount else 10.0,
