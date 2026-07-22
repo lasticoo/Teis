@@ -309,15 +309,13 @@ const TradeDetail = () => {
         </div>
 
         {/* Section 3: Market Context Collector (Objektif) */}
-        {trade.market_context && (
-          <div style={styles.sectionCard}>
-            <div style={styles.sectionHeader}>
-              <h3 style={styles.sectionTitle}>🌍 Konteks Pasar Objektif (Market Context Collector)</h3>
-              <span style={styles.sectionSubtitle}>Snapshot kondisi makro crypto saat entry trade</span>
-            </div>
-            <MarketContextCard context={trade.market_context} />
+        <div style={styles.sectionCard}>
+          <div style={styles.sectionHeader}>
+            <h3 style={styles.sectionTitle}>🌍 Konteks Pasar Objektif (Market Context Collector)</h3>
+            <span style={styles.sectionSubtitle}>Snapshot kondisi makro crypto saat entry trade</span>
           </div>
-        )}
+          <MarketContextCard contextData={trade.market_context} tradeId={trade.id} />
+        </div>
 
         {/* Section 4: Screenshot & Catatan */}
         <div style={styles.sectionCard}>
