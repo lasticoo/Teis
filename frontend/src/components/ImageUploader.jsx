@@ -15,7 +15,11 @@ const ImageUploader = ({
 
   useEffect(() => {
     if (currentImageUrl) {
-      setPreviewUrl(currentImageUrl);
+      // Append cache buster to force browser to refresh the image
+      const cacheBusted = currentImageUrl.includes("?")
+        ? `${currentImageUrl}&t=${Date.now()}`
+        : `${currentImageUrl}?t=${Date.now()}`;
+      setPreviewUrl(cacheBusted);
     }
   }, [currentImageUrl]);
 
@@ -61,9 +65,14 @@ const ImageUploader = ({
         throw new Error(data.detail || "Gagal mengunggah gambar ke MinIO.");
       }
 
-      setSuccessMsg("✅ WebP 80% compressed & saved to MinIO S3!");
-      const newUrl = data.screenshot?.url || URL.createObjectURL(file);
-      setPreviewUrl(newUrl);
+      setSuccessMsg("✅ WebP 80% terkompresi & berhasil diunggah ke MinIO S3!");
+      
+      const rawUrl = data.screenshot?.url || URL.createObjectURL(file);
+      const cacheBustedUrl = rawUrl.includes("?")
+        ? `${rawUrl}&t=${Date.now()}`
+        : `${rawUrl}?t=${Date.now()}`;
+
+      setPreviewUrl(cacheBustedUrl);
 
       if (onUploadSuccess) {
         onUploadSuccess(data.screenshot);
@@ -110,8 +119,14 @@ const ImageUploader = ({
       {error && <div style={styles.errorBox}>{error}</div>}
       {successMsg && <div style={styles.successBox}>{successMsg}</div>}
 
-      {/* Preview if image exists */}
-      {previewUrl ? (
+      {/* 1. Show loading state whenever upload is in progress */}
+      {loading ? (
+        <div style={styles.loadingContainer}>
+          <div style={styles.spinner} />
+          <span style={styles.loadingText}>⚙️ Mengompresi WebP 80% & Uploading MinIO...</span>
+        </div>
+      ) : previewUrl ? (
+        /* 2. Show image preview when image is available */
         <div style={styles.previewContainer}>
           <img
             src={previewUrl}
@@ -139,7 +154,7 @@ const ImageUploader = ({
           </div>
         </div>
       ) : (
-        /* Dropzone Upload Area */
+        /* 3. Dropzone Upload Area when no image exists */
         <div
           style={{
             ...styles.dropzone,
@@ -150,26 +165,19 @@ const ImageUploader = ({
           onDragOver={handleDrag}
           onDrop={handleDrop}
         >
-          {loading ? (
-            <div style={styles.loadingWrapper}>
-              <div style={styles.spinner} />
-              <span style={styles.loadingText}>⚙️ Kompresi WebP 80% & Uploading MinIO S3...</span>
-            </div>
-          ) : (
-            <label style={styles.dropzoneContent}>
-              <span style={styles.uploadIcon}>📁</span>
-              <span style={styles.dropText}>
-                Drag & Drop file gambar di sini, atau <span style={styles.browseLink}>Pilih File</span>
-              </span>
-              <span style={styles.subDropText}>Format yang didukung: PNG, JPG, WEBP (Max 5MB)</span>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleChange}
-                style={{ display: "none" }}
-              />
-            </label>
-          )}
+          <label style={styles.dropzoneContent}>
+            <span style={styles.uploadIcon}>📁</span>
+            <span style={styles.dropText}>
+              Drag & Drop file gambar di sini, atau <span style={styles.browseLink}>Pilih File</span>
+            </span>
+            <span style={styles.subDropText}>Format yang didukung: PNG, JPG, WEBP (Max 5MB)</span>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleChange}
+              style={{ display: "none" }}
+            />
+          </label>
         </div>
       )}
     </div>
@@ -219,7 +227,7 @@ const styles = {
   dropzone: {
     border: "2px dashed rgba(124, 58, 237, 0.35)",
     borderRadius: "10px",
-    padding: "24px 16px",
+    padding: "28px 16px",
     textAlign: "center",
     backgroundColor: "rgba(124, 58, 237, 0.04)",
     cursor: "pointer",
@@ -252,15 +260,20 @@ const styles = {
     fontSize: "11px",
     color: "#64748b",
   },
-  loadingWrapper: {
+  loadingContainer: {
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    gap: "10px",
+    justifyContent: "center",
+    gap: "12px",
+    height: "180px",
+    backgroundColor: "rgba(124, 58, 237, 0.06)",
+    borderRadius: "10px",
+    border: "1px dashed rgba(124, 58, 237, 0.4)",
   },
   spinner: {
-    width: "24px",
-    height: "24px",
+    width: "28px",
+    height: "28px",
     border: "3px solid rgba(255, 255, 255, 0.1)",
     borderTop: "3px solid #7c3aed",
     borderRadius: "50%",
@@ -294,7 +307,7 @@ const styles = {
     gap: "8px",
   },
   zoomBtn: {
-    backgroundColor: "rgba(0, 0, 0, 0.75)",
+    backgroundColor: "rgba(0, 0, 0, 0.8)",
     color: "#a78bfa",
     border: "1px solid rgba(167, 139, 250, 0.4)",
     padding: "6px 12px",
@@ -304,7 +317,7 @@ const styles = {
     cursor: "pointer",
   },
   reuploadBtn: {
-    backgroundColor: "rgba(0, 0, 0, 0.75)",
+    backgroundColor: "rgba(0, 0, 0, 0.8)",
     color: "#ffffff",
     border: "1px solid rgba(255, 255, 255, 0.2)",
     padding: "6px 12px",
