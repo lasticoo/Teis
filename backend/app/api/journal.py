@@ -694,6 +694,8 @@ async def upload_screenshot(
     trade_id: str = Form(...),
     stage: str = Form(...),
     file: UploadFile = File(...),
+    is_correction: bool = Form(False),
+    reason: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
@@ -703,7 +705,8 @@ async def upload_screenshot(
     Compresses image to WebP format (quality=80) using Pillow.
     Uploads to MinIO S3 bucket under key 'screenshots/{trade_id}/{stage}.webp'.
     Saves/updates record in 'screenshots' MySQL table.
-    Generates short-lived Pre-signed URL (15 mins / 900 seconds) for UI.
+    If stage == 'before_entry' on a locked trade, requires is_correction=True and reason (min 10 chars),
+    and records an audit log entry in 'trade_corrections'.
     """
     # 1. Validate trade existence
     trade = db.query(Trade).filter(Trade.id == trade_id).first()
@@ -721,12 +724,18 @@ async def upload_screenshot(
             detail=f"Stage '{stage}' tidak valid. Pilih salah satu dari {allowed_stages}."
         )
 
-    # 2b. Immutability check: 'before_entry' screenshot cannot be modified directly if trade is locked
+    # 2b. Immutability check: 'before_entry' screenshot cannot be modified directly if trade is locked, unless via formal correction
     if stage == "before_entry" and trade.locked_at is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Screenshot 'Sebelum Entry' (before_entry) telah terkunci secara imutabel. Perubahan hanya dapat dilakukan melalui fitur Ajukan Koreksi."
-        )
+        if not is_correction:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Screenshot 'Sebelum Entry' (before_entry) telah terkunci secara imutabel. Perubahan hanya dapat dilakukan melalui fitur Ajukan Koreksi."
+            )
+        if not reason or len(reason.strip()) < 10:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Alasan koreksi screenshot 'Sebelum Entry' wajib diisi minimal 10 karakter."
+            )
 
     # 3. Read file content & validate size (< 5MB)
     image_bytes = await file.read()
@@ -791,6 +800,8 @@ async def upload_screenshot(
 
     # 8. Save or update database record in 'screenshots' table
     sc = db.query(Screenshot).filter(Screenshot.trade_id == trade_id, Screenshot.stage == stage).first()
+    old_file_path = sc.file_path if sc else "Belum Ada Screenshot"
+
     if not sc:
         sc = Screenshot(
             id=str(uuid.uuid4()),
@@ -803,6 +814,19 @@ async def upload_screenshot(
     else:
         sc.file_path = object_key
         sc.uploaded_at = datetime.now()
+
+    # 9. If this is a formal correction, record audit entry in trade_corrections table
+    if is_correction:
+        corr = TradeCorrection(
+            id=str(uuid.uuid4()),
+            trade_id=trade_id,
+            field_name="screenshot_before_entry",
+            old_value=old_file_path,
+            new_value=object_key,
+            reason=reason.strip() if reason else "Koreksi screenshot Sebelum Entry",
+            corrected_at=datetime.now()
+        )
+        db.add(corr)
 
     db.commit()
     db.refresh(sc)

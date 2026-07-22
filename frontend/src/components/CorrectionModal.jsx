@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 
 const FIELD_OPTIONS = [
+  { value: "screenshot_before_entry", label: "🖼️ Screenshot Chart Sebelum Entry (Before Entry)" },
   { value: "confidence_level", label: "Tingkat Keyakinan (Confidence Level 1-10)" },
   { value: "plan_adherence", label: "Kepatuhan pada Plan (Plan Adherence)" },
   { value: "psychological_tags", label: "Kondisi Emosional Saat Entry" },
@@ -14,9 +15,10 @@ const FIELD_OPTIONS = [
 ];
 
 const CorrectionModal = ({ isOpen, onClose, trade, onSuccess }) => {
-  const [fieldName, setFieldName] = useState("confidence_level");
+  const [fieldName, setFieldName] = useState("screenshot_before_entry");
   const [oldValue, setOldValue] = useState("");
   const [newValue, setNewValue] = useState("");
+  const [selectedFile, setSelectedFile] = useState(null);
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -25,6 +27,9 @@ const CorrectionModal = ({ isOpen, onClose, trade, onSuccess }) => {
   const getInitialOldValue = (field, tradeObj) => {
     if (!tradeObj) return "—";
     switch (field) {
+      case "screenshot_before_entry":
+        const sc = tradeObj.screenshots?.find((s) => s.stage === "before_entry");
+        return sc ? `screenshots/${tradeObj.id}/before_entry.webp` : "Belum Ada Screenshot";
       case "confidence_level":
         return tradeObj.psychology?.confidence_level !== undefined && tradeObj.psychology?.confidence_level !== null
           ? String(tradeObj.psychology.confidence_level)
@@ -74,6 +79,8 @@ const CorrectionModal = ({ isOpen, onClose, trade, onSuccess }) => {
         return "bull_trend";
       case "session":
         return "asia";
+      case "screenshot_before_entry":
+        return "";
       default:
         return "";
     }
@@ -84,6 +91,7 @@ const CorrectionModal = ({ isOpen, onClose, trade, onSuccess }) => {
       const fetchedOld = getInitialOldValue(fieldName, trade);
       setOldValue(fetchedOld);
       setNewValue(getInitialNewValue(fieldName));
+      setSelectedFile(null);
     }
   }, [fieldName, trade]);
 
@@ -100,15 +108,53 @@ const CorrectionModal = ({ isOpen, onClose, trade, onSuccess }) => {
       return;
     }
 
-    if (!newValue.trim()) {
-      setError("Nilai baru wajib diisi.");
-      return;
-    }
-
     const token = localStorage.getItem("token") || localStorage.getItem("access_token");
     setLoading(true);
 
     try {
+      // Specialized upload flow for screenshot_before_entry correction
+      if (fieldName === "screenshot_before_entry") {
+        if (!selectedFile) {
+          setError("Silakan pilih file gambar baru untuk koreksi screenshot Sebelum Entry.");
+          setLoading(false);
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append("trade_id", trade.id);
+        formData.append("stage", "before_entry");
+        formData.append("file", selectedFile);
+        formData.append("is_correction", "true");
+        formData.append("reason", cleanReason);
+
+        const res = await fetch("http://localhost:8000/api/v1/screenshots/upload", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || "Gagal mengunggah koreksi screenshot.");
+        }
+
+        setSuccessMsg("✅ Koreksi screenshot Sebelum Entry berhasil dikompresi (WebP 80%) & dicatat di Audit Log!");
+        setTimeout(() => {
+          if (onSuccess) onSuccess();
+          onClose();
+        }, 1200);
+        return;
+      }
+
+      // Standard field correction flow
+      if (!newValue.trim()) {
+        setError("Nilai baru wajib diisi.");
+        setLoading(false);
+        return;
+      }
+
       const res = await fetch("http://localhost:8000/api/v1/journal/correct", {
         method: "POST",
         headers: {
@@ -145,6 +191,32 @@ const CorrectionModal = ({ isOpen, onClose, trade, onSuccess }) => {
 
   const renderNewValueInput = () => {
     switch (fieldName) {
+      case "screenshot_before_entry":
+        return (
+          <div style={styles.filePickerBox}>
+            <label style={styles.filePickerLabel}>
+              📁 Upload Gambar Baru (PNG, JPG, WEBP - Max 5MB)
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    setSelectedFile(e.target.files[0]);
+                    setNewValue(e.target.files[0].name);
+                  }
+                }}
+                style={{ display: "none" }}
+              />
+            </label>
+            {selectedFile ? (
+              <div style={styles.selectedFilePill}>
+                📷 Terpilih: <b>{selectedFile.name}</b> ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
+              </div>
+            ) : (
+              <span style={styles.filePickerHint}>Klik untuk memilih file chart pengganti</span>
+            )}
+          </div>
+        );
       case "confidence_level":
         return (
           <select value={newValue} onChange={(e) => setNewValue(e.target.value)} style={styles.select}>
@@ -250,7 +322,7 @@ const CorrectionModal = ({ isOpen, onClose, trade, onSuccess }) => {
             </div>
 
             <div style={styles.inputGroup}>
-              <label style={styles.label}>3. Nilai Baru (Pilihan Terstruktur)</label>
+              <label style={styles.label}>3. Nilai Baru (File/Pilihan Terstruktur)</label>
               {renderNewValueInput()}
             </div>
           </div>
@@ -407,11 +479,41 @@ const styles = {
     color: "#94a3b8",
     padding: "10px 14px",
     borderRadius: "8px",
-    fontSize: "13px",
+    fontSize: "12px",
     fontWeight: "700",
     minHeight: "41px",
     display: "flex",
     alignItems: "center",
+    wordBreak: "break-all",
+  },
+  filePickerBox: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+  },
+  filePickerLabel: {
+    backgroundColor: "rgba(124, 58, 237, 0.15)",
+    border: "1px dashed #7c3aed",
+    color: "#a78bfa",
+    padding: "8px 12px",
+    borderRadius: "8px",
+    fontSize: "12px",
+    fontWeight: "700",
+    cursor: "pointer",
+    textAlign: "center",
+  },
+  selectedFilePill: {
+    backgroundColor: "rgba(16, 185, 129, 0.12)",
+    border: "1px solid rgba(16, 185, 129, 0.3)",
+    borderRadius: "6px",
+    color: "#34d399",
+    padding: "6px 10px",
+    fontSize: "11px",
+    fontWeight: "600",
+  },
+  filePickerHint: {
+    fontSize: "11px",
+    color: "#64748b",
   },
   input: {
     backgroundColor: "rgba(15, 12, 30, 0.9)",
