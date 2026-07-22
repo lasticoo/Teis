@@ -18,7 +18,6 @@ const ImageUploader = ({
 
   useEffect(() => {
     if (currentImageUrl) {
-      // Append cache buster to force browser to refresh the image
       const cacheBusted = currentImageUrl.includes("?")
         ? `${currentImageUrl}&t=${Date.now()}`
         : `${currentImageUrl}?t=${Date.now()}`;
@@ -28,30 +27,24 @@ const ImageUploader = ({
 
   const handleFileSelect = async (file) => {
     if (!file) return;
-
-    // Prevent direct upload for before_entry stage if trade is locked
     if (isBeforeEntryLocked) {
-      setError("❌ Screenshot 'Sebelum Entry' terkunci secara imutabel. Perubahan harus via Ajukan Koreksi.");
+      setError("Screenshot 'Sebelum Entry' terkunci. Ajukan Koreksi untuk mengubahnya.");
       return;
     }
 
     setError("");
     setSuccessMsg("");
 
-    // 1. Client-side size check (5MB)
     const maxSizeBytes = 5 * 1024 * 1024;
     if (file.size > maxSizeBytes) {
       setError("Ukuran file melebihi batas maksimal 5MB.");
       return;
     }
-
-    // 2. Client-side image MIME type check
     if (!file.type.startsWith("image/")) {
       setError("File harus berupa gambar valid (PNG, JPG, WEBP).");
       return;
     }
 
-    // Prepare upload
     const token = localStorage.getItem("token") || localStorage.getItem("access_token");
     const formData = new FormData();
     formData.append("trade_id", tradeId);
@@ -63,18 +56,14 @@ const ImageUploader = ({
     try {
       const res = await fetch("http://localhost:8000/api/v1/screenshots/upload", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
 
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.detail || "Gagal mengunggah gambar ke MinIO.");
-      }
+      if (!res.ok) throw new Error(data.detail || "Gagal mengunggah gambar.");
 
-      setSuccessMsg("✅ WebP 80% terkompresi & berhasil diunggah ke MinIO S3!");
+      setSuccessMsg("✅ Gambar berhasil diunggah & dikompres WebP 80%");
 
       const rawUrl = data.screenshot?.url || URL.createObjectURL(file);
       const cacheBustedUrl = rawUrl.includes("?")
@@ -83,9 +72,7 @@ const ImageUploader = ({
 
       setPreviewUrl(cacheBustedUrl);
 
-      if (onUploadSuccess) {
-        onUploadSuccess(data.screenshot);
-      }
+      if (onUploadSuccess) onUploadSuccess(data.screenshot);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -97,54 +84,53 @@ const ImageUploader = ({
     e.preventDefault();
     e.stopPropagation();
     if (isBeforeEntryLocked) return;
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true);
-    } else if (e.type === "dragleave") {
-      setDragActive(false);
-    }
+    if (e.type === "dragenter" || e.type === "dragover") setDragActive(true);
+    else if (e.type === "dragleave") setDragActive(false);
   };
 
   const handleDrop = (e) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    if (isBeforeEntryLocked) {
-      setError("❌ Screenshot 'Sebelum Entry' terkunci secara imutabel. Perubahan harus via Ajukan Koreksi.");
-      return;
-    }
+    if (isBeforeEntryLocked) return;
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       handleFileSelect(e.dataTransfer.files[0]);
     }
   };
 
   const handleChange = (e) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFileSelect(e.target.files[0]);
-    }
+    if (e.target.files && e.target.files[0]) handleFileSelect(e.target.files[0]);
   };
 
   return (
     <div style={styles.container}>
+      {/* Header */}
       <div style={styles.headerRow}>
         <span style={styles.label}>{stageLabel}</span>
         {isBeforeEntryLocked ? (
-          <span style={styles.lockedBadge}>🔒 Terkunci (Imutabel)</span>
+          <span style={styles.lockedChip}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 4 }}>
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+            Imutabel
+          </span>
         ) : (
-          <span style={styles.maxSizeHint}>Max 5MB • WebP 80% Auto Compress</span>
+          <span style={styles.maxSizeHint}>Max 5MB • WebP 80%</span>
         )}
       </div>
 
+      {/* Messages */}
       {error && <div style={styles.errorBox}>{error}</div>}
       {successMsg && <div style={styles.successBox}>{successMsg}</div>}
 
-      {/* 1. Show loading state whenever upload is in progress */}
+      {/* Content Area */}
       {loading ? (
         <div style={styles.loadingContainer}>
           <div style={styles.spinner} />
-          <span style={styles.loadingText}>⚙️ Mengompresi WebP 80% & Uploading MinIO...</span>
+          <span style={styles.loadingText}>Mengompresi & mengunggah...</span>
         </div>
       ) : previewUrl ? (
-        /* 2. Show image preview when image is available */
         <div style={styles.previewContainer}>
           <img
             src={previewUrl}
@@ -158,15 +144,19 @@ const ImageUploader = ({
               onClick={() => window.open(previewUrl, "_blank")}
               style={styles.zoomBtn}
             >
-              🔍 Open Full
+              ⛶ Lihat
             </button>
             {isBeforeEntryLocked ? (
-              <span style={styles.lockedBtnHint}>
-                🔒 Perubahan via Ajukan Koreksi
+              <span style={styles.lockedOverlayChip}>
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 3 }}>
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+                Ajukan Koreksi
               </span>
             ) : (
               <label style={styles.reuploadBtn}>
-                📷 Ganti Gambar
+                📷 Ganti
                 <input
                   type="file"
                   accept="image/*"
@@ -178,7 +168,7 @@ const ImageUploader = ({
           </div>
         </div>
       ) : (
-        /* 3. Dropzone Upload Area when no image exists */
+        /* Dropzone */
         <div
           style={{
             ...styles.dropzone,
@@ -192,19 +182,19 @@ const ImageUploader = ({
         >
           {isBeforeEntryLocked ? (
             <div style={styles.dropzoneContentDisabled}>
-              <span style={styles.uploadIcon}>🔒</span>
-              <span style={styles.dropText}>Screenshot Sebelum Entry Terkunci</span>
-              <span style={styles.subDropText}>
-                Imutabilitas aktif. Perubahan data harus diajukan via menu Ajukan Koreksi.
-              </span>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+              <span style={styles.dropTextMuted}>Terkunci — perubahan via Ajukan Koreksi</span>
             </div>
           ) : (
             <label style={styles.dropzoneContent}>
               <span style={styles.uploadIcon}>📁</span>
               <span style={styles.dropText}>
-                Drag & Drop file gambar di sini, atau <span style={styles.browseLink}>Pilih File</span>
+                Drag & drop atau <span style={styles.browseLink}>pilih file</span>
               </span>
-              <span style={styles.subDropText}>Format yang didukung: PNG, JPG, WEBP (Max 5MB)</span>
+              <span style={styles.subDropText}>PNG, JPG, WEBP • Max 5MB</span>
               <input
                 type="file"
                 accept="image/*"
@@ -241,50 +231,54 @@ const styles = {
   },
   maxSizeHint: {
     fontSize: "11px",
-    color: "#64748b",
+    color: "#475569",
   },
-  lockedBadge: {
-    fontSize: "11px",
-    fontWeight: "700",
-    color: "#f87171",
-    backgroundColor: "rgba(239, 68, 68, 0.15)",
-    border: "1px solid rgba(239, 68, 68, 0.3)",
+  /* Subtle grey chip — not aggressive red */
+  lockedChip: {
+    display: "inline-flex",
+    alignItems: "center",
+    fontSize: "10px",
+    fontWeight: "600",
+    color: "#64748b",
+    backgroundColor: "rgba(100, 116, 139, 0.12)",
+    border: "1px solid rgba(100, 116, 139, 0.2)",
     padding: "2px 8px",
-    borderRadius: "4px",
+    borderRadius: "20px",
+    letterSpacing: "0.3px",
   },
   errorBox: {
-    backgroundColor: "rgba(239, 68, 68, 0.15)",
-    border: "1px solid rgba(239, 68, 68, 0.3)",
+    backgroundColor: "rgba(239, 68, 68, 0.1)",
+    border: "1px solid rgba(239, 68, 68, 0.25)",
     borderRadius: "6px",
     color: "#f87171",
-    padding: "8px 12px",
+    padding: "7px 12px",
     fontSize: "12px",
   },
   successBox: {
-    backgroundColor: "rgba(16, 185, 129, 0.15)",
-    border: "1px solid rgba(16, 185, 129, 0.3)",
+    backgroundColor: "rgba(16, 185, 129, 0.1)",
+    border: "1px solid rgba(16, 185, 129, 0.25)",
     borderRadius: "6px",
     color: "#34d399",
-    padding: "8px 12px",
+    padding: "7px 12px",
     fontSize: "12px",
   },
   dropzone: {
-    border: "2px dashed rgba(124, 58, 237, 0.35)",
+    border: "2px dashed rgba(124, 58, 237, 0.3)",
     borderRadius: "10px",
     padding: "28px 16px",
     textAlign: "center",
-    backgroundColor: "rgba(124, 58, 237, 0.04)",
+    backgroundColor: "rgba(124, 58, 237, 0.03)",
     cursor: "pointer",
     transition: "all 0.2s ease",
   },
   dropzoneDisabled: {
-    borderColor: "rgba(239, 68, 68, 0.3)",
-    backgroundColor: "rgba(239, 68, 68, 0.03)",
-    cursor: "not-allowed",
+    border: "1px dashed rgba(100, 116, 139, 0.2)",
+    backgroundColor: "transparent",
+    cursor: "default",
   },
   dropzoneActive: {
     borderColor: "#7c3aed",
-    backgroundColor: "rgba(124, 58, 237, 0.12)",
+    backgroundColor: "rgba(124, 58, 237, 0.1)",
   },
   dropzoneContent: {
     display: "flex",
@@ -297,15 +291,20 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    gap: "6px",
-    cursor: "not-allowed",
+    gap: "8px",
+    padding: "12px 0",
+    cursor: "default",
   },
   uploadIcon: {
-    fontSize: "24px",
+    fontSize: "22px",
   },
   dropText: {
     fontSize: "13px",
     color: "#cbd5e1",
+  },
+  dropTextMuted: {
+    fontSize: "12px",
+    color: "#475569",
   },
   browseLink: {
     color: "#a78bfa",
@@ -314,37 +313,36 @@ const styles = {
   },
   subDropText: {
     fontSize: "11px",
-    color: "#64748b",
+    color: "#475569",
   },
   loadingContainer: {
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    gap: "12px",
-    height: "180px",
-    backgroundColor: "rgba(124, 58, 237, 0.06)",
+    gap: "10px",
+    height: "140px",
+    backgroundColor: "rgba(124, 58, 237, 0.04)",
     borderRadius: "10px",
-    border: "1px dashed rgba(124, 58, 237, 0.4)",
+    border: "1px dashed rgba(124, 58, 237, 0.3)",
   },
   spinner: {
-    width: "28px",
-    height: "28px",
-    border: "3px solid rgba(255, 255, 255, 0.1)",
-    borderTop: "3px solid #7c3aed",
+    width: "24px",
+    height: "24px",
+    border: "2px solid rgba(255, 255, 255, 0.08)",
+    borderTop: "2px solid #7c3aed",
     borderRadius: "50%",
-    animation: "spin 1s linear infinite",
+    animation: "spin 0.8s linear infinite",
   },
   loadingText: {
     fontSize: "12px",
-    color: "#a78bfa",
-    fontWeight: "600",
+    color: "#64748b",
   },
   previewContainer: {
     position: "relative",
     borderRadius: "8px",
     overflow: "hidden",
-    border: "1px solid rgba(255, 255, 255, 0.1)",
+    border: "1px solid rgba(255, 255, 255, 0.07)",
     height: "200px",
     backgroundColor: "#05040a",
   },
@@ -360,37 +358,41 @@ const styles = {
     bottom: "8px",
     right: "8px",
     display: "flex",
-    gap: "8px",
+    gap: "6px",
   },
   zoomBtn: {
-    backgroundColor: "rgba(0, 0, 0, 0.8)",
-    color: "#a78bfa",
-    border: "1px solid rgba(167, 139, 250, 0.4)",
-    padding: "6px 12px",
+    backgroundColor: "rgba(0, 0, 0, 0.65)",
+    color: "#94a3b8",
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+    padding: "5px 10px",
     borderRadius: "6px",
     fontSize: "11px",
-    fontWeight: "700",
+    fontWeight: "600",
     cursor: "pointer",
   },
   reuploadBtn: {
-    backgroundColor: "rgba(0, 0, 0, 0.8)",
+    backgroundColor: "rgba(124, 58, 237, 0.75)",
     color: "#ffffff",
-    border: "1px solid rgba(255, 255, 255, 0.2)",
-    padding: "6px 12px",
+    border: "none",
+    padding: "5px 10px",
     borderRadius: "6px",
     fontSize: "11px",
-    fontWeight: "700",
+    fontWeight: "600",
     cursor: "pointer",
   },
-  lockedBtnHint: {
-    backgroundColor: "rgba(239, 68, 68, 0.8)",
-    color: "#ffffff",
-    border: "1px solid rgba(255, 255, 255, 0.2)",
-    padding: "6px 12px",
+  /* Subtle muted chip shown on top of image when locked */
+  lockedOverlayChip: {
+    display: "inline-flex",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.55)",
+    color: "#94a3b8",
+    border: "1px solid rgba(255,255,255,0.1)",
+    padding: "5px 10px",
     borderRadius: "6px",
-    fontSize: "11px",
-    fontWeight: "700",
-    cursor: "not-allowed",
+    fontSize: "10px",
+    fontWeight: "600",
+    cursor: "default",
+    backdropFilter: "blur(4px)",
   },
 };
 
