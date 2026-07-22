@@ -8,6 +8,7 @@ from typing import List, Optional
 from botocore.client import Config
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, status, Form, UploadFile, File
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError, IntegrityError
 
