@@ -59,6 +59,8 @@ class TestImmutabilityAndCorrections(unittest.TestCase):
     def tearDown(self):
         # Cleanup test records
         try:
+            self.db.execute(text(f"UPDATE trades SET locked_at = NULL WHERE id = '{self.trade_id}'"))
+            self.db.commit()
             self.db.query(TradeCorrection).filter(TradeCorrection.original_trade_id == self.trade_id).delete()
             self.db.query(Psychology).filter(Psychology.trade_id == self.trade_id).delete()
             self.db.query(TradeExecution).filter(TradeExecution.trade_id == self.trade_id).delete()
