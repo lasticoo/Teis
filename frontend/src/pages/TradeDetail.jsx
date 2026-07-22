@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import MarketContextCard from "../components/MarketContextCard";
 import CorrectionModal from "../components/CorrectionModal";
+import ImageUploader from "../components/ImageUploader";
 
 const TradeDetail = () => {
   const { tradeId } = useParams();
@@ -358,35 +359,43 @@ const TradeDetail = () => {
         {/* Section 4: Screenshot & Catatan */}
         <div style={styles.sectionCard}>
           <div style={styles.sectionHeader}>
-            <h3 style={styles.sectionTitle}>🖼️ Screenshot Chart & Catatan Tambahan</h3>
-            <span style={styles.sectionSubtitle}>Bukti visual setup chart sebelum entry dan catatan analisis</span>
+            <h3 style={styles.sectionTitle}>🖼️ Pengelola Gambar & Screenshot Chart (MinIO S3 WebP 80%)</h3>
+            <span style={styles.sectionSubtitle}>
+              Dokumentasi visual chart trading terkompresi otomatis pada 3 tahap eksekusi
+            </span>
           </div>
 
-          <div style={styles.gridTwoCols}>
-            {/* Screenshot */}
-            <div style={styles.subCard}>
-              <h4 style={styles.subCardTitle}>Screenshot Chart Sebelum Entry</h4>
-              {trade.screenshots && trade.screenshots.length > 0 ? (
-                <div style={styles.screenshotGrid}>
-                  {trade.screenshots.map((sc) => (
-                    <div key={sc.id} style={styles.screenshotBox} onClick={() => setZoomedImage(sc.url)}>
-                      <img src={sc.url} alt="Chart Screenshot" style={styles.screenshotImg} />
-                      <span style={styles.zoomHint}>🔍 Klik untuk Zoom Gambar</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <span style={styles.dimText}>Tidak ada screenshot chart yang diupload.</span>
-              )}
-            </div>
+          <div style={styles.uploadGrid3Cols}>
+            <ImageUploader
+              tradeId={trade.id}
+              stage="before_entry"
+              stageLabel="1. Sebelum Entry (Before Entry)"
+              currentImageUrl={trade.screenshots?.find((s) => s.stage === "before_entry")?.url}
+              onUploadSuccess={fetchTradeDetail}
+            />
 
-            {/* Notes */}
-            <div style={styles.subCard}>
-              <h4 style={styles.subCardTitle}>Catatan Bebas Trader</h4>
-              <p style={styles.freeNotesText}>
-                {trade.psychology?.free_notes || "Tidak ada catatan bebas untuk trade ini."}
-              </p>
-            </div>
+            <ImageUploader
+              tradeId={trade.id}
+              stage="during_trade"
+              stageLabel="2. Saat Trade (During Trade)"
+              currentImageUrl={trade.screenshots?.find((s) => s.stage === "during_trade")?.url}
+              onUploadSuccess={fetchTradeDetail}
+            />
+
+            <ImageUploader
+              tradeId={trade.id}
+              stage="exit"
+              stageLabel="3. Setelah Exit (After Exit)"
+              currentImageUrl={trade.screenshots?.find((s) => s.stage === "exit")?.url}
+              onUploadSuccess={fetchTradeDetail}
+            />
+          </div>
+
+          <div style={styles.subCard}>
+            <h4 style={styles.subCardTitle}>Catatan Bebas Trader</h4>
+            <p style={styles.freeNotesText}>
+              {trade.psychology?.free_notes || "Tidak ada catatan bebas untuk trade ini."}
+            </p>
           </div>
         </div>
 
@@ -559,6 +568,11 @@ const styles = {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
     gap: "12px",
+  },
+  uploadGrid3Cols: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+    gap: "16px",
   },
   execCardItem: {
     backgroundColor: "rgba(15, 12, 30, 0.5)",

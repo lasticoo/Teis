@@ -1,7 +1,9 @@
+import io
 import json
 import logging
 import uuid
 import boto3
+from PIL import Image
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
@@ -687,6 +689,140 @@ def submit_trade_correction(
         )
 
 
+@router.post("/screenshots/upload")
+async def upload_screenshot(
+    trade_id: str = Form(...),
+    stage: str = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    Uploads a chart screenshot for a trade stage ('before_entry', 'during_trade', 'exit').
+    Enforces max 5MB original file size limit (HTTP 413 Payload Too Large).
+    Compresses image to WebP format (quality=80) using Pillow.
+    Uploads to MinIO S3 bucket under key 'screenshots/{trade_id}/{stage}.webp'.
+    Saves/updates record in 'screenshots' MySQL table.
+    Generates short-lived Pre-signed URL (15 mins / 900 seconds) for UI.
+    """
+    # 1. Validate trade existence
+    trade = db.query(Trade).filter(Trade.id == trade_id).first()
+    if not trade:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Trade dengan ID {trade_id} tidak ditemukan."
+        )
+
+    # 2. Validate stage enum
+    allowed_stages = ["before_entry", "during_trade", "exit"]
+    if stage not in allowed_stages:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Stage '{stage}' tidak valid. Pilih salah satu dari {allowed_stages}."
+        )
+
+    # 3. Read file content & validate size (< 5MB)
+    image_bytes = await file.read()
+    max_size = 5 * 1024 * 1024  # 5MB
+    if len(image_bytes) > max_size:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Ukuran file melebihi batas maksimal 5MB."
+        )
+
+    # 4. Validate image MIME type
+    content_type = file.content_type or ""
+    if not (content_type.startswith("image/") or file.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp'))):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File yang diunggah harus berupa gambar valid (PNG, JPG, WEBP)."
+        )
+
+    # 5. Compress to WebP (quality=80) using Pillow
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+
+        output_buffer = io.BytesIO()
+        img.save(output_buffer, format="WEBP", quality=80)
+        compressed_bytes = output_buffer.getvalue()
+    except Exception as e:
+        logger.error(f"Failed to compress image with Pillow: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Gagal memproses/mengompresi gambar: {str(e)}"
+        )
+
+    # 6. Upload compressed WebP to MinIO S3
+    object_key = f"screenshots/{trade_id}/{stage}.webp"
+    try:
+        s3_client = boto3.client(
+            's3',
+            endpoint_url=f"http://{settings.MINIO_ENDPOINT}",
+            aws_access_key_id=settings.MINIO_ACCESS_KEY,
+            aws_secret_access_key=settings.MINIO_SECRET_KEY,
+            config=Config(signature_version='s3v4'),
+            region_name='us-east-1'
+        )
+
+        s3_client.put_object(
+            Bucket=settings.MINIO_BUCKET_NAME,
+            Key=object_key,
+            Body=compressed_bytes,
+            ContentType="image/webp"
+        )
+    except Exception as e:
+        logger.error(f"Failed to upload screenshot to MinIO S3: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Gagal terhubung ke storage MinIO: {str(e)}"
+        )
+
+    # 7. Generate 15-minute Pre-signed URL
+    try:
+        presigned_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': settings.MINIO_BUCKET_NAME, 'Key': object_key},
+            ExpiresIn=900
+        )
+        presigned_url = presigned_url.replace("http://minio:9000", "http://localhost:9000")
+    except Exception:
+        presigned_url = f"http://localhost:9000/{settings.MINIO_BUCKET_NAME}/{object_key}"
+
+    # 8. Save or update database record in 'screenshots' table
+    sc = db.query(Screenshot).filter(Screenshot.trade_id == trade_id, Screenshot.stage == stage).first()
+    if not sc:
+        sc = Screenshot(
+            id=str(uuid.uuid4()),
+            trade_id=trade_id,
+            stage=stage,
+            file_path=object_key,
+            uploaded_at=datetime.now()
+        )
+        db.add(sc)
+    else:
+        sc.file_path = object_key
+        sc.uploaded_at = datetime.now()
+
+    db.commit()
+    db.refresh(sc)
+
+    logger.info(f"Berhasil mengunggah & mengompresi screenshot WebP untuk trade {trade_id} stage {stage}.")
+    return {
+        "status": "success",
+        "message": "Screenshot berhasil dikompresi (WebP quality 80) dan diunggah ke MinIO.",
+        "screenshot": {
+            "id": sc.id,
+            "trade_id": sc.trade_id,
+            "stage": sc.stage,
+            "file_path": sc.file_path,
+            "url": presigned_url,
+            "uploaded_at": sc.uploaded_at.isoformat()
+        }
+    }
+
+
 @router.get("/journal/detail/{trade_id}")
 def get_trade_detail(
     trade_id: str,
@@ -696,6 +832,7 @@ def get_trade_detail(
     """
     Returns full comprehensive details for a single trade record.
     Includes fills, psychology tags, market context, setups, screenshots, execution params, and audit corrections.
+    Generates 15-minute Pre-signed URLs for MinIO chart screenshots.
     """
     trade = db.query(Trade).filter(Trade.id == trade_id).first()
     if not trade:
@@ -704,10 +841,35 @@ def get_trade_detail(
             detail=f"Trade with ID {trade_id} not found."
         )
 
-    def sanitize_url(raw_url: Optional[str]) -> Optional[str]:
-        if not raw_url:
+    def generate_screenshot_url(file_path: str) -> Optional[str]:
+        if not file_path:
             return None
-        return raw_url.replace("http://minio:9000", "http://localhost:9000")
+        key = file_path
+        if not key.startswith("screenshots/"):
+            if "teis-screenshots/" in file_path:
+                key = file_path.split("teis-screenshots/")[-1]
+            elif "screenshots/" in file_path:
+                key = "screenshots/" + file_path.split("screenshots/")[-1]
+            else:
+                key = f"screenshots/{trade.id}/before_entry.webp"
+
+        try:
+            s3 = boto3.client(
+                's3',
+                endpoint_url=f"http://{settings.MINIO_ENDPOINT}",
+                aws_access_key_id=settings.MINIO_ACCESS_KEY,
+                aws_secret_access_key=settings.MINIO_SECRET_KEY,
+                config=Config(signature_version='s3v4'),
+                region_name='us-east-1'
+            )
+            purl = s3.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': settings.MINIO_BUCKET_NAME, 'Key': key},
+                ExpiresIn=900
+            )
+            return purl.replace("http://minio:9000", "http://localhost:9000")
+        except Exception:
+            return f"http://localhost:9000/{settings.MINIO_BUCKET_NAME}/{key}"
 
     linked_fills = []
     for tf in trade.fills:
@@ -759,7 +921,7 @@ def get_trade_detail(
         {
             "id": sc.id,
             "stage": sc.stage,
-            "url": sanitize_url(sc.file_path),
+            "url": generate_screenshot_url(sc.file_path),
             "uploaded_at": sc.uploaded_at.isoformat() if sc.uploaded_at else None
         }
         for sc in trade.screenshots
