@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import MarketContextCard from "../components/MarketContextCard";
+import CorrectionModal from "../components/CorrectionModal";
 
 const TradeDetail = () => {
   const { tradeId } = useParams();
@@ -9,6 +10,7 @@ const TradeDetail = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [zoomedImage, setZoomedImage] = useState(null);
+  const [isCorrectionModalOpen, setIsCorrectionModalOpen] = useState(false);
 
   const fetchTradeDetail = async () => {
     const token = localStorage.getItem("token") || localStorage.getItem("access_token");
@@ -165,6 +167,14 @@ const TradeDetail = () => {
                 {trade.pnl === null ? "—" : trade.pnl >= 0 ? `+$${trade.pnl.toFixed(2)}` : `-$${Math.abs(trade.pnl).toFixed(2)}`}
               </span>
             </div>
+            {trade.is_locked && (
+              <button
+                onClick={() => setIsCorrectionModalOpen(true)}
+                style={styles.correctBtn}
+              >
+                📝 Ajukan Koreksi
+              </button>
+            )}
           </div>
         </div>
 
@@ -247,6 +257,34 @@ const TradeDetail = () => {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+          {/* Trade Execution Parameters */}
+          {trade.execution && (
+            <div style={styles.execContainer}>
+              <h4 style={styles.subCardTitle}>⚙️ Parameter Eksekusi & Manajemen Risiko</h4>
+              <div style={styles.execCardGrid}>
+                <div style={styles.execCardItem}>
+                  <span style={styles.execLabel}>Tipe Order:</span>
+                  <span style={styles.execValue}>{trade.execution.order_type.toUpperCase()}</span>
+                </div>
+                <div style={styles.execCardItem}>
+                  <span style={styles.execLabel}>Moved to Breakeven (BE):</span>
+                  <span style={trade.execution.moved_to_breakeven ? styles.badgePlanYes : styles.badgePlanNo}>
+                    {trade.execution.moved_to_breakeven ? "YA" : "TIDAK"}
+                  </span>
+                </div>
+                <div style={styles.execCardItem}>
+                  <span style={styles.execLabel}>Trailing Stop Used:</span>
+                  <span style={trade.execution.trailing_stop_used ? styles.badgePlanYes : styles.badgePlanNo}>
+                    {trade.execution.trailing_stop_used ? "YA" : "TIDAK"}
+                  </span>
+                </div>
+                <div style={styles.execCardItem}>
+                  <span style={styles.execLabel}>Alasan Exit:</span>
+                  <span style={styles.execValue}>{trade.execution.exit_reason || "—"}</span>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -351,6 +389,51 @@ const TradeDetail = () => {
             </div>
           </div>
         </div>
+
+        {/* Section 5: Audit Log Koreksi (trade_corrections) */}
+        <div style={styles.sectionCard}>
+          <div style={styles.sectionHeader}>
+            <h3 style={styles.sectionTitle}>📋 Audit Log Koreksi Trade (`trade_corrections`)</h3>
+            <span style={styles.sectionSubtitle}>
+              Histori resmi koreksi data pasca-penguncian imutabilitas database
+            </span>
+          </div>
+
+          {trade.corrections && trade.corrections.length > 0 ? (
+            <div style={styles.tableWrapper}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th style={styles.th}>FIELD DIKOREKSI</th>
+                    <th style={styles.th}>NILAI LAMA</th>
+                    <th style={styles.th}>NILAI BARU</th>
+                    <th style={styles.th}>ALASAN KOREKSI</th>
+                    <th style={styles.th}>WAKTU KOREKSI</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trade.corrections.map((c) => (
+                    <tr key={c.id} style={styles.tr}>
+                      <td style={styles.td}>
+                        <span style={styles.auditFieldPill}>{c.field_name}</span>
+                      </td>
+                      <td style={styles.tdCode}>{c.old_value || "—"}</td>
+                      <td style={{ ...styles.tdCode, color: "#34d399", fontWeight: "700" }}>
+                        {c.new_value || "—"}
+                      </td>
+                      <td style={styles.tdReason}>{c.reason}</td>
+                      <td style={styles.td}>
+                        {c.corrected_at ? new Date(c.corrected_at).toLocaleString() : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <span style={styles.dimText}>Belum ada riwayat koreksi data pada trade ini.</span>
+          )}
+        </div>
       </div>
 
       {/* Image Zoom Modal */}
@@ -364,6 +447,14 @@ const TradeDetail = () => {
           </div>
         </div>
       )}
+
+      {/* Correction Form Modal */}
+      <CorrectionModal
+        isOpen={isCorrectionModalOpen}
+        onClose={() => setIsCorrectionModalOpen(false)}
+        tradeId={trade.id}
+        onSuccess={fetchTradeDetail}
+      />
     </div>
   );
 };
@@ -434,10 +525,74 @@ const styles = {
     fontSize: "13px",
     color: "#94a3b8",
   },
+  headerRight: {
+    display: "flex",
+    alignItems: "center",
+    gap: "20px",
+  },
   pnlHeaderCard: {
     display: "flex",
     flexDirection: "column",
     alignItems: "flex-end",
+  },
+  correctBtn: {
+    backgroundColor: "rgba(124, 58, 237, 0.2)",
+    border: "1px solid #7c3aed",
+    color: "#ffffff",
+    padding: "10px 18px",
+    borderRadius: "8px",
+    fontWeight: "700",
+    fontSize: "13px",
+    cursor: "pointer",
+    boxShadow: "0 4px 15px rgba(124, 58, 237, 0.25)",
+    transition: "all 0.2s ease",
+  },
+  execContainer: {
+    marginTop: "16px",
+    paddingTop: "16px",
+    borderTop: "1px solid rgba(255, 255, 255, 0.08)",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  },
+  execCardGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+    gap: "12px",
+  },
+  execCardItem: {
+    backgroundColor: "rgba(15, 12, 30, 0.5)",
+    border: "1px solid rgba(255, 255, 255, 0.05)",
+    borderRadius: "8px",
+    padding: "12px 14px",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  execLabel: {
+    fontSize: "12px",
+    color: "#94a3b8",
+  },
+  execValue: {
+    fontSize: "13px",
+    fontWeight: "700",
+    color: "#ffffff",
+  },
+  tdReason: {
+    padding: "12px 14px",
+    fontSize: "12px",
+    color: "#cbd5e1",
+    lineHeight: "1.4",
+    maxWidth: "350px",
+  },
+  auditFieldPill: {
+    backgroundColor: "rgba(59, 130, 246, 0.15)",
+    color: "#60a5fa",
+    border: "1px solid rgba(59, 130, 246, 0.3)",
+    padding: "3px 8px",
+    borderRadius: "6px",
+    fontSize: "11px",
+    fontWeight: "700",
   },
   pnlHeaderLabel: {
     fontSize: "11px",

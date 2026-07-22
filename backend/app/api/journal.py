@@ -517,6 +517,105 @@ async def tag_trade(
     return {"status": "success", "message": "Trade tagged successfully."}
 
 
+class CorrectionRequest(BaseModel):
+    original_trade_id: str
+    field_name: str
+    old_value: Optional[str] = None
+    new_value: str
+    reason: str
+
+
+@router.post("/journal/correct")
+def submit_trade_correction(
+    request: CorrectionRequest,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    Submits a formal trade correction record into trade_corrections audit log table.
+    Enforces minimum 10 characters for correction reason.
+    Handles SQL trigger exceptions gracefully (HTTP 409 Conflict).
+    """
+    # 1. Validate trade existence
+    trade = db.query(Trade).filter(Trade.id == request.original_trade_id).first()
+    if not trade:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Trade dengan ID {request.original_trade_id} tidak ditemukan."
+        )
+
+    # 2. Validate reason length (minimum 10 characters)
+    reason_clean = (request.reason or "").strip()
+    if len(reason_clean) < 10:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Alasan koreksi (reason) wajib diisi minimal 10 karakter."
+        )
+
+    # 3. Validate allowed field names
+    allowed_fields = [
+        "confidence_level",
+        "plan_adherence",
+        "psychological_tags",
+        "bias_arah_manual",
+        "session",
+        "free_notes",
+        "setup_tags",
+        "order_type",
+        "moved_to_breakeven",
+        "trailing_stop_used",
+        "entry_price",
+        "stop_loss",
+        "take_profit",
+        "exit_reason"
+    ]
+    if request.field_name not in allowed_fields:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Field '{request.field_name}' tidak terdaftar dalam taksonomi koreksi yang diizinkan."
+        )
+
+    # 4. Insert into trade_corrections table
+    try:
+        corr = TradeCorrection(
+            original_trade_id=request.original_trade_id,
+            field_name=request.field_name,
+            old_value=request.old_value,
+            new_value=request.new_value,
+            reason=reason_clean,
+            corrected_at=datetime.now()
+        )
+        db.add(corr)
+        db.commit()
+        db.refresh(corr)
+        logger.info(f"Berhasil mencatat audit koreksi untuk trade {trade.id} pada field {request.field_name}.")
+        return {
+            "status": "success",
+            "message": "Koreksi data trade berhasil dicatat dalam audit log.",
+            "correction": {
+                "id": corr.id,
+                "original_trade_id": corr.original_trade_id,
+                "field_name": corr.field_name,
+                "old_value": corr.old_value,
+                "new_value": corr.new_value,
+                "reason": corr.reason,
+                "corrected_at": corr.corrected_at.isoformat()
+            }
+        }
+    except (OperationalError, IntegrityError) as e:
+        db.rollback()
+        err_str = str(e)
+        if "Trade sudah terkunci" in err_str or "45000" in err_str:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Trade sudah terkunci oleh sistem. Modifikasi langsung dilarang, namun audit log koreksi telah diproses."
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Gagal mencatat koreksi: {err_str}"
+        )
+
+
 @router.get("/journal/detail/{trade_id}")
 def get_trade_detail(
     trade_id: str,
@@ -525,7 +624,7 @@ def get_trade_detail(
 ):
     """
     Returns full comprehensive details for a single trade record.
-    Includes fills, psychology tags, market context, setups, screenshots, and corrections.
+    Includes fills, psychology tags, market context, setups, screenshots, execution params, and audit corrections.
     """
     trade = db.query(Trade).filter(Trade.id == trade_id).first()
     if not trade:
@@ -564,6 +663,26 @@ def get_trade_detail(
         "plan_adherence": psy.plan_adherence,
         "free_notes": psy.free_notes
     } if psy else None
+
+    exec_rec = trade.execution
+    exec_data = {
+        "order_type": exec_rec.order_type if exec_rec else "market",
+        "moved_to_breakeven": exec_rec.moved_to_breakeven if exec_rec else False,
+        "trailing_stop_used": exec_rec.trailing_stop_used if exec_rec else False,
+        "exit_reason": exec_rec.exit_reason if exec_rec else None
+    } if exec_rec else None
+
+    corrections_data = [
+        {
+            "id": c.id,
+            "field_name": c.field_name,
+            "old_value": c.old_value,
+            "new_value": c.new_value,
+            "reason": c.reason,
+            "corrected_at": c.corrected_at.isoformat() if c.corrected_at else None
+        }
+        for c in trade.corrections
+    ]
 
     screenshots_data = [
         {
@@ -617,6 +736,8 @@ def get_trade_detail(
         "setups": setup_names,
         "fills": linked_fills,
         "psychology": psy_data,
+        "execution": exec_data,
+        "corrections": corrections_data,
         "screenshots": screenshots_data,
         "market_context": ctx_data
     }
