@@ -515,3 +515,108 @@ async def tag_trade(
         logger.info(f"Scheduled lock_trade and collect_market_context Celery tasks for trade {trade_id}.")
         
     return {"status": "success", "message": "Trade tagged successfully."}
+
+
+@router.get("/journal/detail/{trade_id}")
+def get_trade_detail(
+    trade_id: str,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    Returns full comprehensive details for a single trade record.
+    Includes fills, psychology tags, market context, setups, screenshots, and corrections.
+    """
+    trade = db.query(Trade).filter(Trade.id == trade_id).first()
+    if not trade:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Trade with ID {trade_id} not found."
+        )
+
+    def sanitize_url(raw_url: Optional[str]) -> Optional[str]:
+        if not raw_url:
+            return None
+        return raw_url.replace("http://minio:9000", "http://localhost:9000")
+
+    linked_fills = []
+    for tf in trade.fills:
+        ef = tf.exchange_fill
+        if ef:
+            linked_fills.append({
+                "id": ef.id,
+                "binance_trade_id": ef.binance_trade_id,
+                "binance_order_id": ef.binance_order_id,
+                "role": tf.role,
+                "side": ef.side,
+                "price": float(ef.price),
+                "qty": float(ef.qty),
+                "fee": float(ef.fee),
+                "executed_at": ef.executed_at.isoformat() if ef.executed_at else None
+            })
+
+    setup_names = [tag.taxonomy_version.tag_name for tag in trade.setup_tags if tag.taxonomy_version]
+
+    psy = trade.psychology
+    psy_data = {
+        "confidence_level": psy.confidence_level,
+        "psychological_tags": psy.psychological_tags if isinstance(psy.psychological_tags, list) else json.loads(psy.psychological_tags or "[]"),
+        "plan_adherence": psy.plan_adherence,
+        "free_notes": psy.free_notes
+    } if psy else None
+
+    screenshots_data = [
+        {
+            "id": sc.id,
+            "stage": sc.stage,
+            "url": sanitize_url(sc.file_path),
+            "uploaded_at": sc.uploaded_at.isoformat() if sc.uploaded_at else None
+        }
+        for sc in trade.screenshots
+    ]
+
+    ctx = trade.market_context[0] if trade.market_context else None
+    ctx_data = {
+        "trend_htf": ctx.trend_htf,
+        "trend_ltf": ctx.trend_ltf,
+        "bias_arah_manual": ctx.bias_arah_manual,
+        "atr": str(ctx.atr) if ctx and ctx.atr else None,
+        "volume_24h": str(ctx.volume_24h) if ctx and ctx.volume_24h else None,
+        "open_interest": str(ctx.open_interest) if ctx and ctx.open_interest else None,
+        "funding_rate": str(ctx.funding_rate) if ctx and ctx.funding_rate else None,
+        "btc_dominance": str(ctx.btc_dominance) if ctx and ctx.btc_dominance else None,
+        "fear_greed_index": ctx.fear_greed_index if ctx else None,
+        "session": ctx.session if ctx else None
+    } if ctx else None
+
+    badge_map = {
+        "binance_sync": "Live",
+        "historical_import": "Import",
+        "manual": "Manual"
+    }
+
+    return {
+        "id": trade.id,
+        "pair": trade.pair,
+        "direction": trade.direction,
+        "entry_price": float(trade.entry_price),
+        "exit_price": float(trade.exit_price) if trade.exit_price else None,
+        "pnl": float(trade.pnl) if trade.pnl is not None else None,
+        "fee": float(trade.fee) if trade.fee is not None else None,
+        "risk_amount": float(trade.risk_amount) if trade.risk_amount else 10.0,
+        "rr_planned": float(trade.rr_planned) if trade.rr_planned else None,
+        "rr_realized": float(trade.rr_realized) if trade.rr_realized is not None else None,
+        "entry_time": trade.entry_time.isoformat() if trade.entry_time else None,
+        "exit_time": trade.exit_time.isoformat() if trade.exit_time else None,
+        "holding_time_sec": trade.holding_time_sec,
+        "status": "Closed" if trade.exit_time else "Open",
+        "data_source": trade.data_source,
+        "source_badge": badge_map.get(trade.data_source, "Live"),
+        "is_locked": trade.locked_at is not None,
+        "locked_at": trade.locked_at.isoformat() if trade.locked_at else None,
+        "setups": setup_names,
+        "fills": linked_fills,
+        "psychology": psy_data,
+        "screenshots": screenshots_data,
+        "market_context": ctx_data
+    }

@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import MarketContextCard from "../components/MarketContextCard";
 
 const Journal = () => {
+  const navigate = useNavigate();
   const [trades, setTrades] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -204,7 +206,7 @@ const Journal = () => {
                       <td style={styles.td}>
                         {t.setups && t.setups.length > 0 ? (
                           <div style={styles.setupTags}>
-                            {t.setups.map((s, idx) => {
+                            {t.setups.slice(0, 2).map((s, idx) => {
                               let style = styles.setupPill;
                               if (s.includes("H4")) {
                                 style = {
@@ -241,6 +243,9 @@ const Journal = () => {
                                 <span key={idx} style={style}>{s}</span>
                               );
                             })}
+                            {t.setups.length > 2 && (
+                              <span style={styles.moreBadge}>+{t.setups.length - 2} lagi</span>
+                            )}
                           </div>
                         ) : (
                           <span style={styles.dimText}>—</span>
@@ -253,81 +258,13 @@ const Journal = () => {
                       </td>
                       <td style={styles.td}>
                         <button
-                          onClick={() => setSelectedTrade(selectedTrade?.id === t.id ? null : t)}
-                          style={styles.detailBtn}
+                          onClick={() => navigate(`/journal/${t.id}`)}
+                          style={styles.detailBtnNav}
                         >
-                          {selectedTrade?.id === t.id ? "Tutup ▲" : "Rincian ▼"}
+                          Lihat Detail →
                         </button>
                       </td>
                     </tr>
-
-                    {/* Expanded Detail Panel */}
-                    {selectedTrade?.id === t.id && (
-                      <tr>
-                        <td colSpan={12} style={styles.detailTd}>
-                          <div style={styles.expandedPanel}>
-                            <h4 style={styles.panelTitle}>Rincian Eksekusi & Context: {t.pair}</h4>
-                            
-                            {/* Fills Table */}
-                            <div style={styles.fillsSection}>
-                              <h5 style={styles.subTitle}>Fill Binance Terhubung ({t.fills ? t.fills.length : 0})</h5>
-                              {t.fills && t.fills.length > 0 ? (
-                                <table style={styles.miniTable}>
-                                  <thead>
-                                    <tr>
-                                      <th style={styles.miniTh}>Role</th>
-                                      <th style={styles.miniTh}>Binance Trade ID</th>
-                                      <th style={styles.miniTh}>Side</th>
-                                      <th style={styles.miniTh}>Harga</th>
-                                      <th style={styles.miniTh}>Kuantitas</th>
-                                      <th style={styles.miniTh}>Fee</th>
-                                      <th style={styles.miniTh}>Waktu Eksekusi</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {t.fills.map((f) => (
-                                      <tr key={f.id} style={styles.miniTr}>
-                                        <td style={styles.miniTd}>
-                                          <span style={f.role === "entry" ? styles.badgeEntry : styles.badgeExit}>
-                                            {f.role.toUpperCase()}
-                                          </span>
-                                        </td>
-                                        <td style={styles.miniTd}>{f.binance_trade_id}</td>
-                                        <td style={styles.miniTd}>{f.side}</td>
-                                        <td style={styles.miniTd}>${f.price.toFixed(4)}</td>
-                                        <td style={styles.miniTd}>{f.qty}</td>
-                                        <td style={styles.miniTd}>${f.fee.toFixed(4)}</td>
-                                        <td style={styles.miniTd}>
-                                          {f.executed_at ? new Date(f.executed_at).toLocaleString("id-ID") : "—"}
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              ) : (
-                                <p style={styles.dimText}>Belum ada fill terhubung.</p>
-                              )}
-                            </div>
-
-                            {/* Screenshot & Context */}
-                            <div style={styles.contextGrid}>
-                              {t.screenshot_url && (
-                                <div style={styles.screenshotBox}>
-                                  <h5 style={styles.subTitle}>Screenshot Sebelum Entry</h5>
-                                  <img src={t.screenshot_url} alt="Chart Screenshot" style={styles.screenshotImg} />
-                                </div>
-                              )}
-
-                              {t.market_context && (
-                                <div style={{ flex: 1 }}>
-                                  <MarketContextCard contextData={t.market_context} />
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
                   </React.Fragment>
                 ))}
               </tbody>
@@ -541,6 +478,26 @@ const styles = {
     borderRadius: "4px",
     fontSize: "10px",
     fontWeight: "600",
+  },
+  moreBadge: {
+    background: "rgba(255, 255, 255, 0.08)",
+    color: "#cbd5e1",
+    border: "1px solid rgba(255, 255, 255, 0.15)",
+    padding: "2px 6px",
+    borderRadius: "4px",
+    fontSize: "10px",
+    fontWeight: "700",
+  },
+  detailBtnNav: {
+    background: "rgba(124, 58, 237, 0.2)",
+    border: "1px solid #7c3aed",
+    color: "#ffffff",
+    padding: "6px 12px",
+    borderRadius: "6px",
+    fontSize: "11px",
+    fontWeight: "700",
+    cursor: "pointer",
+    transition: "all 0.2s ease",
   },
   dimText: {
     color: "#64748b",

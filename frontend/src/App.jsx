@@ -6,6 +6,7 @@ import Verify2FA from "./pages/Verify2FA";
 import Settings from "./pages/Settings";
 import QuickTag from "./pages/QuickTag";
 import Journal from "./pages/Journal";
+import TradeDetail from "./pages/TradeDetail";
 import Navbar from "./components/Navbar";
 
 // Route wrapper to block unauthenticated users
@@ -65,6 +66,16 @@ function AppContent() {
           <ProtectedRoute>
             <ProtectedLayout>
               <Journal />
+            </ProtectedLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/journal/:tradeId"
+        element={
+          <ProtectedRoute>
+            <ProtectedLayout>
+              <TradeDetail />
             </ProtectedLayout>
           </ProtectedRoute>
         }
