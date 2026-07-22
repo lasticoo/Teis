@@ -819,7 +819,7 @@ async def upload_screenshot(
     if is_correction:
         corr = TradeCorrection(
             id=str(uuid.uuid4()),
-            trade_id=trade_id,
+            original_trade_id=trade_id,
             field_name="screenshot_before_entry",
             old_value=old_file_path,
             new_value=object_key,
