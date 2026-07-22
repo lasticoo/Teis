@@ -779,16 +779,8 @@ async def upload_screenshot(
             detail=f"Gagal terhubung ke storage MinIO: {str(e)}"
         )
 
-    # 7. Generate 15-minute Pre-signed URL
-    try:
-        presigned_url = s3_client.generate_presigned_url(
-            'get_object',
-            Params={'Bucket': settings.MINIO_BUCKET_NAME, 'Key': object_key},
-            ExpiresIn=900
-        )
-        presigned_url = presigned_url.replace("http://minio:9000", "http://localhost:9000")
-    except Exception:
-        presigned_url = f"http://localhost:9000/{settings.MINIO_BUCKET_NAME}/{object_key}"
+    # 7. Generate clean accessible MinIO S3 URL
+    public_url = f"http://localhost:9000/{settings.MINIO_BUCKET_NAME}/{object_key}"
 
     # 8. Save or update database record in 'screenshots' table
     sc = db.query(Screenshot).filter(Screenshot.trade_id == trade_id, Screenshot.stage == stage).first()
@@ -817,7 +809,7 @@ async def upload_screenshot(
             "trade_id": sc.trade_id,
             "stage": sc.stage,
             "file_path": sc.file_path,
-            "url": presigned_url,
+            "url": public_url,
             "uploaded_at": sc.uploaded_at.isoformat()
         }
     }
@@ -832,7 +824,7 @@ def get_trade_detail(
     """
     Returns full comprehensive details for a single trade record.
     Includes fills, psychology tags, market context, setups, screenshots, execution params, and audit corrections.
-    Generates 15-minute Pre-signed URLs for MinIO chart screenshots.
+    Generates accessible URLs for MinIO chart screenshots.
     """
     trade = db.query(Trade).filter(Trade.id == trade_id).first()
     if not trade:
@@ -853,23 +845,7 @@ def get_trade_detail(
             else:
                 key = f"screenshots/{trade.id}/before_entry.webp"
 
-        try:
-            s3 = boto3.client(
-                's3',
-                endpoint_url=f"http://{settings.MINIO_ENDPOINT}",
-                aws_access_key_id=settings.MINIO_ACCESS_KEY,
-                aws_secret_access_key=settings.MINIO_SECRET_KEY,
-                config=Config(signature_version='s3v4'),
-                region_name='us-east-1'
-            )
-            purl = s3.generate_presigned_url(
-                'get_object',
-                Params={'Bucket': settings.MINIO_BUCKET_NAME, 'Key': key},
-                ExpiresIn=900
-            )
-            return purl.replace("http://minio:9000", "http://localhost:9000")
-        except Exception:
-            return f"http://localhost:9000/{settings.MINIO_BUCKET_NAME}/{key}"
+        return f"http://localhost:9000/{settings.MINIO_BUCKET_NAME}/{key}"
 
     linked_fills = []
     for tf in trade.fills:
