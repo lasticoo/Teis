@@ -71,16 +71,24 @@ def get_minio_client():
     return s3
 
 def seed_taxonomy_if_empty(db: Session):
-    count = db.query(SetupTaxonomyVersion).count()
-    if count == 0:
-        setups = [
-            ("Liquidity Sweep", "Mengambil likuiditas di atas/bawah key level sebelum pembalikan arah."),
-            ("Order Block", "Area konsolidasi sebelum ekspansi harga yang kuat."),
-            ("FVG", "Fair Value Gap / Ketidakseimbangan harga (imbalance)."),
-            ("CHOCH", "Change of Character / Indikasi awal perubahan trend."),
-            ("Equal High", "Level resistance rata yang berpotensi menyapu likuiditas.")
-        ]
-        for name, desc in setups:
+    setups = [
+        ("Liquidity Sweep", "Mengambil likuiditas di atas/bawah key level sebelum pembalikan arah."),
+        ("Order Block", "Area konsolidasi sebelum ekspansi harga yang kuat."),
+        ("FVG (Fair Value Gap)", "Ketidakseimbangan harga / Imbalance antara candle 1 dan candle 3."),
+        ("CHOCH (Change of Character)", "Indikasi awal perubahan karakter / struktur trend."),
+        ("BOS (Break of Structure)", "Konfirmasi kelanjutan trend setelah menembus swing high/low sebelumnya."),
+        ("Equal High / Low (EQH/EQL)", "Level high/low rata yang berpotensi menarik likuiditas."),
+        ("Supply / Demand Zone", "Zona penawaran/permintaan kuat yang memicu dorongan harga signifikan."),
+        ("Breaker Block", "Order block yang tertembus dan berganti fungsi menjadi support/resistance baru."),
+        ("Mitigation Block", "Area retracement untuk mengurangi posisi sebelum pergerakan berlanjut."),
+        ("Premium / Discount Array", "Penetapan harga di area mahal (premium) untuk sell atau murah (discount) untuk buy."),
+        ("SMT Divergence", "Divergensi korelasi antar instrumen terkait (misal BTC vs ETH)."),
+        ("Session High / Low Sweep", "Penyapuan harga tertinggi/terendah dari sesi Asia, London, atau New York.")
+    ]
+    existing = {t.tag_name for t in db.query(SetupTaxonomyVersion).all()}
+    added = False
+    for name, desc in setups:
+        if name not in existing:
             tax = SetupTaxonomyVersion(
                 version_number=1,
                 tag_name=name,
@@ -88,6 +96,8 @@ def seed_taxonomy_if_empty(db: Session):
                 effective_from=datetime.now()
             )
             db.add(tax)
+            added = True
+    if added:
         db.commit()
 
 @router.get("/journal/pending")

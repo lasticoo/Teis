@@ -130,6 +130,48 @@ class TradeCollectionService:
         }
 
     @staticmethod
+    def auto_match_unlinked_fills(db: Session, trade: Trade):
+        """
+        Scans exchange_fills for matching symbol and time range, linking unlinked entry/exit fills to trade_fills.
+        """
+        from datetime import timedelta
+        entry_side = "BUY" if trade.direction == "long" else "SELL"
+        exit_side = "SELL" if trade.direction == "long" else "BUY"
+
+        candidate_fills = (
+            db.query(ExchangeFill)
+            .filter(ExchangeFill.symbol == trade.pair)
+            .order_by(ExchangeFill.executed_at.asc())
+            .all()
+        )
+
+        for ef in candidate_fills:
+            already_linked = (
+                db.query(TradeFill)
+                .filter(TradeFill.trade_id == trade.id, TradeFill.exchange_fill_id == ef.id)
+                .first()
+            )
+            if already_linked:
+                continue
+
+            ef_time = ef.executed_at.replace(tzinfo=None) if ef.executed_at else None
+            tr_entry_time = trade.entry_time.replace(tzinfo=None) if trade.entry_time else None
+
+            if not ef_time or not tr_entry_time:
+                continue
+
+            # Entry fill: same side, executed close to entry_time (within 5 minutes)
+            if ef.side == entry_side and abs((ef_time - tr_entry_time).total_seconds()) <= 300:
+                tf = TradeFill(trade_id=trade.id, exchange_fill_id=ef.id, role="entry")
+                db.add(tf)
+            # Exit fill: opposite side, executed after entry_time
+            elif ef.side == exit_side and ef_time >= (tr_entry_time - timedelta(seconds=60)):
+                tf = TradeFill(trade_id=trade.id, exchange_fill_id=ef.id, role="exit")
+                db.add(tf)
+
+        db.flush()
+
+    @staticmethod
     def link_trade_fills(db: Session, trade_id: str) -> Dict[str, Any]:
         """
         Links exchange fills to trade, aggregates multi-fills, updates financial metrics in MySQL DB.
@@ -138,6 +180,9 @@ class TradeCollectionService:
         if not trade:
             logger.error(f"Trade {trade_id} not found for linking.")
             return {"status": "failed", "reason": "trade_not_found"}
+
+        # First auto-match any unlinked fills for this trade's symbol
+        TradeCollectionService.auto_match_unlinked_fills(db, trade)
 
         # Query all linked fills from trade_fills
         entry_tf_list = (

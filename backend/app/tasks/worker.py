@@ -135,7 +135,8 @@ def poll_open_positions():
                 
                 # Fetch recent trades to find exit fills
                 try:
-                    start_ts = int(trade.entry_time.timestamp() * 1000) - 60000  # 1 minute before entry
+                    entry_utc = trade.entry_time.replace(tzinfo=timezone.utc) if trade.entry_time.tzinfo is None else trade.entry_time
+                    start_ts = int(entry_utc.timestamp() * 1000) - 60000  # 1 minute before entry
                     fills = BinanceService.get_user_trades(db, pair, start_time=start_ts)
                     process_fills(db, trade, fills, role="exit")
                     
