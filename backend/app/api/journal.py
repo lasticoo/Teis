@@ -6,8 +6,10 @@ from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
 from botocore.client import Config
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, status, Form, UploadFile, File
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError, IntegrityError
 
 from app.database import get_db
 from app.api.deps import get_current_user
@@ -17,6 +19,7 @@ from app.models.models import (
     Psychology, 
     TradeSetupTag, 
     TradeExecution, 
+    TradeCorrection,
     Screenshot, 
     SetupTaxonomyVersion,
     MarketContext
