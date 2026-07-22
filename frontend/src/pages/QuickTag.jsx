@@ -133,10 +133,33 @@ const QuickTag = () => {
   const handleSetupToggle = (id) => {
     if (selectedTrade?.is_tagged && countdown === 0) return; // Locked
 
+    const clickedItem = taxonomy.find((t) => t.id === id);
+    const clickedName = clickedItem ? clickedItem.tag_name : "";
+
     if (selectedSetups.includes(id)) {
       setSelectedSetups(selectedSetups.filter((item) => item !== id));
     } else {
-      setSelectedSetups([...selectedSetups, id]);
+      let updated = [...selectedSetups];
+
+      // Mutually exclusive rule: H4 Bearish vs H4 Bullish (hanya pilih 1)
+      if (clickedName === "H4 Bearish" || clickedName === "H4 Bullish") {
+        const opposingName = clickedName === "H4 Bearish" ? "H4 Bullish" : "H4 Bearish";
+        const opposingItem = taxonomy.find((t) => t.tag_name === opposingName);
+        if (opposingItem) {
+          updated = updated.filter((item) => item !== opposingItem.id);
+        }
+      }
+
+      // Mutually exclusive rule: H1 Bearish vs H1 Bullish (hanya pilih 1)
+      if (clickedName === "H1 Bearish" || clickedName === "H1 Bullish") {
+        const opposingName = clickedName === "H1 Bearish" ? "H1 Bullish" : "H1 Bearish";
+        const opposingItem = taxonomy.find((t) => t.tag_name === opposingName);
+        if (opposingItem) {
+          updated = updated.filter((item) => item !== opposingItem.id);
+        }
+      }
+
+      setSelectedSetups([...updated, id]);
     }
   };
 

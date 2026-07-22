@@ -72,6 +72,7 @@ def get_minio_client():
 
 def seed_taxonomy_if_empty(db: Session):
     setups = [
+        # Standard SMC & Trading Edge Setups
         ("Liquidity Sweep", "Mengambil likuiditas di atas/bawah key level sebelum pembalikan arah."),
         ("Order Block", "Area konsolidasi sebelum ekspansi harga yang kuat."),
         ("FVG (Fair Value Gap)", "Ketidakseimbangan harga / Imbalance antara candle 1 dan candle 3."),
@@ -83,7 +84,19 @@ def seed_taxonomy_if_empty(db: Session):
         ("Mitigation Block", "Area retracement untuk mengurangi posisi sebelum pergerakan berlanjut."),
         ("Premium / Discount Array", "Penetapan harga di area mahal (premium) untuk sell atau murah (discount) untuk buy."),
         ("SMT Divergence", "Divergensi korelasi antar instrumen terkait (misal BTC vs ETH)."),
-        ("Session High / Low Sweep", "Penyapuan harga tertinggi/terendah dari sesi Asia, London, atau New York.")
+        ("Session High / Low Sweep", "Penyapuan harga tertinggi/terendah dari sesi Asia, London, atau New York."),
+        
+        # Specific User Requested Setups
+        ("OB BULLISH", "Order Block Bullish / Area konsolidasi pembeli sebelum lonjakan harga naik."),
+        ("OB BEARISH", "Order Block Bearish / Area konsolidasi penjual sebelum penurunan harga tajam."),
+        ("POI (Liquidity Sweep + Order Block)", "Point of Interest gabungan dari penyapuan likuiditas dan Order Block."),
+        ("FIBONACCI 0.618", "Golden Ratio Retracement Fibonacci 61.8%."),
+        ("FIBONACCI 0.382", "Retracement Fibonacci 38.2%."),
+        ("FIBONACCI 0.786", "Deep Retracement Fibonacci 78.6%."),
+        ("H4 Bearish", "Struktur/Tren Timeframe 4 Jam cenderung Turun (Pilih salah satu H4 Bearish/Bullish)."),
+        ("H4 Bullish", "Struktur/Tren Timeframe 4 Jam cenderung Naik (Pilih salah satu H4 Bearish/Bullish)."),
+        ("H1 Bearish", "Struktur/Tren Timeframe 1 Jam cenderung Turun (Pilih salah satu H1 Bearish/Bullish)."),
+        ("H1 Bullish", "Struktur/Tren Timeframe 1 Jam cenderung Naik (Pilih salah satu H1 Bearish/Bullish).")
     ]
     existing = {t.tag_name for t in db.query(SetupTaxonomyVersion).all()}
     added = False
