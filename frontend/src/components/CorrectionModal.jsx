@@ -1,19 +1,19 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
 const FIELD_OPTIONS = [
-  { value: "confidence_level", label: "Tingkat Keyakinan (Confidence Level)" },
+  { value: "confidence_level", label: "Tingkat Keyakinan (Confidence Level 1-10)" },
   { value: "plan_adherence", label: "Kepatuhan pada Plan (Plan Adherence)" },
   { value: "psychological_tags", label: "Kondisi Emosional Saat Entry" },
-  { value: "bias_arah_manual", label: "Bias Arah Trend (Bull/Bear/Range)" },
-  { value: "session", label: "Sesi Trading (Asia/London/NY)" },
   { value: "free_notes", label: "Catatan Bebas (Free Notes)" },
-  { value: "setup_tags", label: "Tag Model Setup Trade" },
   { value: "order_type", label: "Tipe Order (Limit / Market)" },
-  { value: "moved_to_breakeven", label: "Koreksi Status Breakeven (BE)" },
-  { value: "trailing_stop_used", label: "Koreksi Status Trailing Stop" },
+  { value: "moved_to_breakeven", label: "Status Moved to Breakeven (BE)" },
+  { value: "trailing_stop_used", label: "Status Trailing Stop Used" },
+  { value: "exit_reason", label: "Alasan Exit Trade" },
+  { value: "bias_arah_manual", label: "Bias Arah Trend Pasar" },
+  { value: "session", label: "Sesi Trading (Asia/London/NY)" },
 ];
 
-const CorrectionModal = ({ isOpen, onClose, tradeId, onSuccess }) => {
+const CorrectionModal = ({ isOpen, onClose, trade, onSuccess }) => {
   const [fieldName, setFieldName] = useState("confidence_level");
   const [oldValue, setOldValue] = useState("");
   const [newValue, setNewValue] = useState("");
@@ -22,14 +22,79 @@ const CorrectionModal = ({ isOpen, onClose, tradeId, onSuccess }) => {
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
 
-  if (!isOpen) return null;
+  const getInitialOldValue = (field, tradeObj) => {
+    if (!tradeObj) return "—";
+    switch (field) {
+      case "confidence_level":
+        return tradeObj.psychology?.confidence_level !== undefined && tradeObj.psychology?.confidence_level !== null
+          ? String(tradeObj.psychology.confidence_level)
+          : "—";
+      case "plan_adherence":
+        return tradeObj.psychology?.plan_adherence !== undefined
+          ? tradeObj.psychology.plan_adherence
+            ? "YA"
+            : "TIDAK"
+          : "—";
+      case "psychological_tags":
+        return tradeObj.psychology?.psychological_tags && tradeObj.psychology.psychological_tags.length > 0
+          ? tradeObj.psychology.psychological_tags.join(", ")
+          : "—";
+      case "free_notes":
+        return tradeObj.psychology?.free_notes || "—";
+      case "order_type":
+        return tradeObj.execution?.order_type ? tradeObj.execution.order_type.toUpperCase() : "MARKET";
+      case "moved_to_breakeven":
+        return tradeObj.execution?.moved_to_breakeven ? "YA" : "TIDAK";
+      case "trailing_stop_used":
+        return tradeObj.execution?.trailing_stop_used ? "YA" : "TIDAK";
+      case "exit_reason":
+        return tradeObj.execution?.exit_reason || "—";
+      case "bias_arah_manual":
+        return tradeObj.market_context?.bias_arah_manual || "—";
+      case "session":
+        return tradeObj.market_context?.session || "—";
+      default:
+        return "—";
+    }
+  };
+
+  const getInitialNewValue = (field) => {
+    switch (field) {
+      case "confidence_level":
+        return "8";
+      case "plan_adherence":
+        return "YA";
+      case "moved_to_breakeven":
+        return "YA";
+      case "trailing_stop_used":
+        return "YA";
+      case "order_type":
+        return "limit";
+      case "bias_arah_manual":
+        return "bull_trend";
+      case "session":
+        return "asia";
+      default:
+        return "";
+    }
+  };
+
+  useEffect(() => {
+    if (trade && fieldName) {
+      const fetchedOld = getInitialOldValue(fieldName, trade);
+      setOldValue(fetchedOld);
+      setNewValue(getInitialNewValue(fieldName));
+    }
+  }, [fieldName, trade]);
+
+  if (!isOpen || !trade) return null;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setSuccessMsg("");
 
-    const cleanReason = reason.strip ? reason.strip() : reason.trim();
+    const cleanReason = reason.trim();
     if (cleanReason.length < 10) {
       setError("Alasan koreksi wajib diisi minimal 10 karakter.");
       return;
@@ -51,10 +116,10 @@ const CorrectionModal = ({ isOpen, onClose, tradeId, onSuccess }) => {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          original_trade_id: tradeId,
+          original_trade_id: trade.id,
           field_name: fieldName,
           old_value: oldValue || null,
-          new_value: newValue,
+          new_value: newValue.trim(),
           reason: cleanReason,
         }),
       });
@@ -64,7 +129,7 @@ const CorrectionModal = ({ isOpen, onClose, tradeId, onSuccess }) => {
         throw new Error(data.detail || "Gagal mengajukan koreksi.");
       }
 
-      setSuccessMsg("✅ Koreksi data trade berhasil dicatat dalam audit log.");
+      setSuccessMsg("✅ Koreksi data trade berhasil dicatat dan diterapkan pada data aktif.");
       setTimeout(() => {
         if (onSuccess) onSuccess();
         onClose();
@@ -78,6 +143,72 @@ const CorrectionModal = ({ isOpen, onClose, tradeId, onSuccess }) => {
 
   const reasonLen = reason.trim().length;
 
+  const renderNewValueInput = () => {
+    switch (fieldName) {
+      case "confidence_level":
+        return (
+          <select value={newValue} onChange={(e) => setNewValue(e.target.value)} style={styles.select}>
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
+              <option key={num} value={String(num)}>
+                {num} / 10
+              </option>
+            ))}
+          </select>
+        );
+      case "plan_adherence":
+      case "moved_to_breakeven":
+      case "trailing_stop_used":
+        return (
+          <select value={newValue} onChange={(e) => setNewValue(e.target.value)} style={styles.select}>
+            <option value="YA">YA (Ya/Patuh)</option>
+            <option value="TIDAK">TIDAK (Tidak/Impulsif)</option>
+          </select>
+        );
+      case "order_type":
+        return (
+          <select value={newValue} onChange={(e) => setNewValue(e.target.value)} style={styles.select}>
+            <option value="limit">Limit Order</option>
+            <option value="market">Market Order</option>
+          </select>
+        );
+      case "bias_arah_manual":
+        return (
+          <select value={newValue} onChange={(e) => setNewValue(e.target.value)} style={styles.select}>
+            <option value="bull_trend">Bullish Trend 📈</option>
+            <option value="bear_trend">Bearish Trend 📉</option>
+            <option value="range">Range / Sideways ↔</option>
+          </select>
+        );
+      case "session":
+        return (
+          <select value={newValue} onChange={(e) => setNewValue(e.target.value)} style={styles.select}>
+            <option value="asia">Asia 🌏</option>
+            <option value="london">London 🇬🇧</option>
+            <option value="new_york">New York 🗽</option>
+          </select>
+        );
+      case "free_notes":
+        return (
+          <textarea
+            placeholder="Ketikkan catatan bebas baru..."
+            value={newValue}
+            onChange={(e) => setNewValue(e.target.value)}
+            style={styles.textarea}
+          />
+        );
+      default:
+        return (
+          <input
+            type="text"
+            placeholder="Masukkan nilai baru..."
+            value={newValue}
+            onChange={(e) => setNewValue(e.target.value)}
+            style={styles.input}
+          />
+        );
+    }
+  };
+
   return (
     <div style={styles.overlay} onClick={onClose}>
       <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
@@ -85,7 +216,7 @@ const CorrectionModal = ({ isOpen, onClose, tradeId, onSuccess }) => {
           <div>
             <h3 style={styles.title}>📝 Ajukan Koreksi Data Trade</h3>
             <span style={styles.subtitle}>
-              Trade ini telah terkunci permanen. Seluruh koreksi akan dicatat dalam audit log trade_corrections.
+              Trade ini terkunci permanen. Koreksi akan memperbarui tampilan dan dicatat dalam audit log.
             </span>
           </div>
           <button style={styles.closeBtn} onClick={onClose}>
@@ -98,7 +229,7 @@ const CorrectionModal = ({ isOpen, onClose, tradeId, onSuccess }) => {
 
         <form onSubmit={handleSubmit} style={styles.form}>
           <div style={styles.inputGroup}>
-            <label style={styles.label}>1. Field yang Dikoreksi (Wajib)</label>
+            <label style={styles.label}>1. Field yang Ingin Dikoreksi (Wajib)</label>
             <select
               value={fieldName}
               onChange={(e) => setFieldName(e.target.value)}
@@ -114,31 +245,19 @@ const CorrectionModal = ({ isOpen, onClose, tradeId, onSuccess }) => {
 
           <div style={styles.gridTwo}>
             <div style={styles.inputGroup}>
-              <label style={styles.label}>2. Nilai Lama (Old Value)</label>
-              <input
-                type="text"
-                placeholder="Contoh: 5 (opsional)"
-                value={oldValue}
-                onChange={(e) => setOldValue(e.target.value)}
-                style={styles.input}
-              />
+              <label style={styles.label}>2. Nilai Saat Ini (Otomatis)</label>
+              <div style={styles.readOnlyPill}>{oldValue}</div>
             </div>
 
             <div style={styles.inputGroup}>
-              <label style={styles.label}>3. Nilai Baru (New Value - Wajib)</label>
-              <input
-                type="text"
-                placeholder="Contoh: 8"
-                value={newValue}
-                onChange={(e) => setNewValue(e.target.value)}
-                style={styles.input}
-              />
+              <label style={styles.label}>3. Nilai Baru (Pilihan Terstruktur)</label>
+              {renderNewValueInput()}
             </div>
           </div>
 
           <div style={styles.inputGroup}>
             <div style={styles.labelRow}>
-              <label style={styles.label}>4. Alasan Koreksi (Reason - Wajib Minimal 10 Karakter)</label>
+              <label style={styles.label}>4. Alasan Koreksi (Min 10 Karakter - Wajib)</label>
               <span
                 style={{
                   ...styles.counterText,
@@ -168,7 +287,7 @@ const CorrectionModal = ({ isOpen, onClose, tradeId, onSuccess }) => {
                 ...(loading || reasonLen < 10 ? styles.submitBtnDisabled : {}),
               }}
             >
-              {loading ? "Menyimpan Audit..." : "Kirim Koreksi Audit →"}
+              {loading ? "Menerapkan Koreksi..." : "Kirim & Terapkan Koreksi →"}
             </button>
           </div>
         </form>
@@ -275,16 +394,28 @@ const styles = {
   },
   select: {
     backgroundColor: "rgba(15, 12, 30, 0.9)",
-    border: "1px solid rgba(255, 255, 255, 0.12)",
+    border: "1px solid rgba(255, 255, 255, 0.15)",
     color: "#ffffff",
     padding: "10px 14px",
     borderRadius: "8px",
     fontSize: "13px",
     outline: "none",
   },
+  readOnlyPill: {
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    border: "1px dashed rgba(255, 255, 255, 0.2)",
+    color: "#94a3b8",
+    padding: "10px 14px",
+    borderRadius: "8px",
+    fontSize: "13px",
+    fontWeight: "700",
+    minHeight: "41px",
+    display: "flex",
+    alignItems: "center",
+  },
   input: {
     backgroundColor: "rgba(15, 12, 30, 0.9)",
-    border: "1px solid rgba(255, 255, 255, 0.12)",
+    border: "1px solid rgba(255, 255, 255, 0.15)",
     color: "#ffffff",
     padding: "10px 14px",
     borderRadius: "8px",
@@ -293,7 +424,7 @@ const styles = {
   },
   textarea: {
     backgroundColor: "rgba(15, 12, 30, 0.9)",
-    border: "1px solid rgba(255, 255, 255, 0.12)",
+    border: "1px solid rgba(255, 255, 255, 0.15)",
     color: "#ffffff",
     padding: "10px 14px",
     borderRadius: "8px",

@@ -452,7 +452,7 @@ const TradeDetail = () => {
       <CorrectionModal
         isOpen={isCorrectionModalOpen}
         onClose={() => setIsCorrectionModalOpen(false)}
-        tradeId={trade.id}
+        trade={trade}
         onSuccess={fetchTradeDetail}
       />
     </div>

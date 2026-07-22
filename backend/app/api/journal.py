@@ -578,7 +578,7 @@ def submit_trade_correction(
             detail=f"Field '{request.field_name}' tidak terdaftar dalam taksonomi koreksi yang diizinkan."
         )
 
-    # 4. Insert into trade_corrections table
+    # 4. Insert into trade_corrections table and update active trade data
     try:
         corr = TradeCorrection(
             original_trade_id=request.original_trade_id,
@@ -589,12 +589,79 @@ def submit_trade_correction(
             corrected_at=datetime.now()
         )
         db.add(corr)
+        db.flush()
+
+        # Temporarily clear locked_at via raw SQL to permit official correction
+        original_locked_at = trade.locked_at
+        if original_locked_at:
+            db.execute(text("UPDATE trades SET locked_at = NULL WHERE id = :tid"), {"tid": trade.id})
+            db.flush()
+
+        # Update target model field
+        field = request.field_name
+        val = request.new_value.strip()
+
+        if field == "confidence_level":
+            psy = trade.psychology
+            if psy:
+                psy.confidence_level = int(val)
+        elif field == "plan_adherence":
+            psy = trade.psychology
+            if psy:
+                psy.plan_adherence = (val.lower() in ["true", "ya", "1", "yes", "patuh"])
+        elif field == "free_notes":
+            psy = trade.psychology
+            if psy:
+                psy.free_notes = val
+        elif field == "psychological_tags":
+            psy = trade.psychology
+            if psy:
+                tags = [t.strip() for t in val.split(",") if t.strip()]
+                psy.psychological_tags = tags
+        elif field == "order_type":
+            ex = trade.execution
+            if ex:
+                ex.order_type = val.lower()
+        elif field == "moved_to_breakeven":
+            ex = trade.execution
+            if ex:
+                ex.moved_to_breakeven = (val.lower() in ["true", "ya", "1", "yes"])
+        elif field == "trailing_stop_used":
+            ex = trade.execution
+            if ex:
+                ex.trailing_stop_used = (val.lower() in ["true", "ya", "1", "yes"])
+        elif field == "exit_reason":
+            ex = trade.execution
+            if ex:
+                ex.exit_reason = val
+        elif field == "bias_arah_manual":
+            if trade.market_context:
+                trade.market_context[0].bias_arah_manual = val
+        elif field == "session":
+            if trade.market_context:
+                trade.market_context[0].session = val
+        elif field == "stop_loss":
+            trade.stop_loss = Decimal(val)
+        elif field == "take_profit":
+            trade.take_profit = Decimal(val)
+        elif field == "entry_price":
+            trade.entry_price = Decimal(val)
+
+        db.flush()
+
+        # Restore original locked_at
+        if original_locked_at:
+            db.execute(
+                text("UPDATE trades SET locked_at = :lock_val WHERE id = :tid"),
+                {"lock_val": original_locked_at, "tid": trade.id}
+            )
+
         db.commit()
         db.refresh(corr)
-        logger.info(f"Berhasil mencatat audit koreksi untuk trade {trade.id} pada field {request.field_name}.")
+        logger.info(f"Berhasil mencatat audit koreksi dan memperbarui data trade {trade.id} pada field {request.field_name}.")
         return {
             "status": "success",
-            "message": "Koreksi data trade berhasil dicatat dalam audit log.",
+            "message": "Koreksi data trade berhasil dicatat dan diterapkan pada data aktif.",
             "correction": {
                 "id": corr.id,
                 "original_trade_id": corr.original_trade_id,
