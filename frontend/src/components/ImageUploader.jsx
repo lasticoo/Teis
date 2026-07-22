@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
 const ImageUploader = ({
   tradeId,
@@ -12,6 +12,12 @@ const ImageUploader = ({
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const [previewUrl, setPreviewUrl] = useState(currentImageUrl);
+
+  useEffect(() => {
+    if (currentImageUrl) {
+      setPreviewUrl(currentImageUrl);
+    }
+  }, [currentImageUrl]);
 
   const handleFileSelect = async (file) => {
     if (!file) return;
@@ -56,7 +62,8 @@ const ImageUploader = ({
       }
 
       setSuccessMsg("✅ WebP 80% compressed & saved to MinIO S3!");
-      setPreviewUrl(data.screenshot?.url || URL.createObjectURL(file));
+      const newUrl = data.screenshot?.url || URL.createObjectURL(file);
+      setPreviewUrl(newUrl);
 
       if (onUploadSuccess) {
         onUploadSuccess(data.screenshot);
@@ -106,8 +113,20 @@ const ImageUploader = ({
       {/* Preview if image exists */}
       {previewUrl ? (
         <div style={styles.previewContainer}>
-          <img src={previewUrl} alt={stageLabel} style={styles.previewImg} />
+          <img
+            src={previewUrl}
+            alt={stageLabel}
+            style={styles.previewImg}
+            onClick={() => window.open(previewUrl, "_blank")}
+          />
           <div style={styles.previewOverlay}>
+            <button
+              type="button"
+              onClick={() => window.open(previewUrl, "_blank")}
+              style={styles.zoomBtn}
+            >
+              🔍 Open Full
+            </button>
             <label style={styles.reuploadBtn}>
               📷 Ganti Gambar
               <input
@@ -257,18 +276,32 @@ const styles = {
     borderRadius: "8px",
     overflow: "hidden",
     border: "1px solid rgba(255, 255, 255, 0.1)",
-    maxHeight: "220px",
+    height: "200px",
+    backgroundColor: "#05040a",
   },
   previewImg: {
     width: "100%",
-    maxHeight: "220px",
-    objectFit: "cover",
+    height: "100%",
+    objectFit: "contain",
     display: "block",
+    cursor: "pointer",
   },
   previewOverlay: {
     position: "absolute",
     bottom: "8px",
     right: "8px",
+    display: "flex",
+    gap: "8px",
+  },
+  zoomBtn: {
+    backgroundColor: "rgba(0, 0, 0, 0.75)",
+    color: "#a78bfa",
+    border: "1px solid rgba(167, 139, 250, 0.4)",
+    padding: "6px 12px",
+    borderRadius: "6px",
+    fontSize: "11px",
+    fontWeight: "700",
+    cursor: "pointer",
   },
   reuploadBtn: {
     backgroundColor: "rgba(0, 0, 0, 0.75)",
