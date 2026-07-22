@@ -204,9 +204,43 @@ const Journal = () => {
                       <td style={styles.td}>
                         {t.setups && t.setups.length > 0 ? (
                           <div style={styles.setupTags}>
-                            {t.setups.map((s, idx) => (
-                              <span key={idx} style={styles.setupPill}>{s}</span>
-                            ))}
+                            {t.setups.map((s, idx) => {
+                              let style = styles.setupPill;
+                              if (s.includes("H4")) {
+                                style = {
+                                  background: "rgba(59, 130, 246, 0.2)",
+                                  color: "#60a5fa",
+                                  border: "1px solid rgba(59, 130, 246, 0.35)",
+                                  padding: "2px 6px",
+                                  borderRadius: "4px",
+                                  fontSize: "10px",
+                                  fontWeight: "700",
+                                };
+                              } else if (s.includes("H1")) {
+                                style = {
+                                  background: "rgba(16, 185, 129, 0.2)",
+                                  color: "#34d399",
+                                  border: "1px solid rgba(16, 185, 129, 0.35)",
+                                  padding: "2px 6px",
+                                  borderRadius: "4px",
+                                  fontSize: "10px",
+                                  fontWeight: "700",
+                                };
+                              } else if (s.includes("FIBONACCI")) {
+                                style = {
+                                  background: "rgba(245, 158, 11, 0.2)",
+                                  color: "#fbbf24",
+                                  border: "1px solid rgba(245, 158, 11, 0.35)",
+                                  padding: "2px 6px",
+                                  borderRadius: "4px",
+                                  fontSize: "10px",
+                                  fontWeight: "700",
+                                };
+                              }
+                              return (
+                                <span key={idx} style={style}>{s}</span>
+                              );
+                            })}
                           </div>
                         ) : (
                           <span style={styles.dimText}>—</span>
