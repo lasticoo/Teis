@@ -379,26 +379,163 @@ const QuickTag = () => {
               {successMsg && <div style={styles.success}>{successMsg}</div>}
 
               <form onSubmit={handleSubmit} style={styles.form}>
-                {/* Row Setup */}
+                {/* ── 1. PENATAAN SETUP BERDASARKAN TIMEFRAME H4, H1 & FIBONACCI ── */}
                 <div style={styles.inputGroup}>
-                  <label style={styles.label}>1. Pilihlah Setup Trade (Multi-select)</label>
-                  <div style={styles.pillsRow}>
-                    {taxonomy.map((tax) => (
-                      <button
-                        type="button"
-                        key={tax.id}
-                        disabled={selectedTrade.is_tagged && countdown === 0}
-                        onClick={() => handleSetupToggle(tax.id)}
-                        style={{
-                          ...styles.pillButton,
-                          ...(selectedSetups.includes(tax.id)
-                            ? styles.pillButtonActive
-                            : {}),
-                        }}
-                      >
-                        {tax.tag_name}
-                      </button>
-                    ))}
+                  <label style={styles.label}>1. Pilihlah Setup Trade (Terstruktur per Timeframe)</label>
+                  
+                  <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 10 }}>
+                    {/* Card H4 (4 Jam) */}
+                    <div style={styles.setupCardH4}>
+                      <div style={styles.setupCardHeader}>
+                        <span style={styles.setupCardTitle}>🟦 TIMEFRAME H4 (4 JAM)</span>
+                        <span style={styles.setupCardSubtitle}>Trend & Setup Utama 4H</span>
+                      </div>
+                      
+                      {/* Tren H4 */}
+                      <div style={{ marginBottom: 12 }}>
+                        <span style={styles.subLabel}>Arah Tren H4 (Pilih 1):</span>
+                        <div style={styles.pillsRow}>
+                          {taxonomy.filter(t => ["H4 Bullish", "H4 Bearish"].includes(t.tag_name)).map((tax) => (
+                            <button
+                              type="button"
+                              key={tax.id}
+                              disabled={selectedTrade.is_tagged && countdown === 0}
+                              onClick={() => handleSetupToggle(tax.id)}
+                              style={{
+                                ...styles.pillButton,
+                                ...(selectedSetups.includes(tax.id) ? styles.pillButtonActiveH4 : {}),
+                              }}
+                            >
+                              {tax.tag_name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Setup H4 */}
+                      <div>
+                        <span style={styles.subLabel}>Model Setup H4 (Multi-select):</span>
+                        <div style={styles.pillsRow}>
+                          {taxonomy.filter(t => t.tag_name.includes("(H4)") && !["H4 Bullish", "H4 Bearish"].includes(t.tag_name)).map((tax) => (
+                            <button
+                              type="button"
+                              key={tax.id}
+                              disabled={selectedTrade.is_tagged && countdown === 0}
+                              onClick={() => handleSetupToggle(tax.id)}
+                              style={{
+                                ...styles.pillButton,
+                                ...(selectedSetups.includes(tax.id) ? styles.pillButtonActiveH4 : {}),
+                              }}
+                            >
+                              {tax.tag_name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Card H1 (1 Jam) */}
+                    <div style={styles.setupCardH1}>
+                      <div style={styles.setupCardHeader}>
+                        <span style={styles.setupCardTitle}>🟩 TIMEFRAME H1 (1 JAM)</span>
+                        <span style={styles.setupCardSubtitle}>Trend & Trigger Entry 1H</span>
+                      </div>
+                      
+                      {/* Tren H1 */}
+                      <div style={{ marginBottom: 12 }}>
+                        <span style={styles.subLabel}>Arah Tren H1 (Pilih 1):</span>
+                        <div style={styles.pillsRow}>
+                          {taxonomy.filter(t => ["H1 Bullish", "H1 Bearish"].includes(t.tag_name)).map((tax) => (
+                            <button
+                              type="button"
+                              key={tax.id}
+                              disabled={selectedTrade.is_tagged && countdown === 0}
+                              onClick={() => handleSetupToggle(tax.id)}
+                              style={{
+                                ...styles.pillButton,
+                                ...(selectedSetups.includes(tax.id) ? styles.pillButtonActiveH1 : {}),
+                              }}
+                            >
+                              {tax.tag_name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Setup H1 */}
+                      <div>
+                        <span style={styles.subLabel}>Model Setup H1 (Multi-select):</span>
+                        <div style={styles.pillsRow}>
+                          {taxonomy.filter(t => t.tag_name.includes("(H1)") && !["H1 Bullish", "H1 Bearish"].includes(t.tag_name)).map((tax) => (
+                            <button
+                              type="button"
+                              key={tax.id}
+                              disabled={selectedTrade.is_tagged && countdown === 0}
+                              onClick={() => handleSetupToggle(tax.id)}
+                              style={{
+                                ...styles.pillButton,
+                                ...(selectedSetups.includes(tax.id) ? styles.pillButtonActiveH1 : {}),
+                              }}
+                            >
+                              {tax.tag_name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Card Fibonacci */}
+                    <div style={styles.setupCardFib}>
+                      <div style={styles.setupCardHeader}>
+                        <span style={styles.setupCardTitle}>🟨 KONFIRMASI FIBONACCI</span>
+                        <span style={styles.setupCardSubtitle}>Level Retracement</span>
+                      </div>
+                      <div style={styles.pillsRow}>
+                        {taxonomy.filter(t => t.tag_name.includes("FIBONACCI")).map((tax) => (
+                          <button
+                            type="button"
+                            key={tax.id}
+                            disabled={selectedTrade.is_tagged && countdown === 0}
+                            onClick={() => handleSetupToggle(tax.id)}
+                            style={{
+                              ...styles.pillButton,
+                              ...(selectedSetups.includes(tax.id) ? styles.pillButtonActiveFib : {}),
+                            }}
+                          >
+                            {tax.tag_name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Card Makro, Sesi & Setup Lainnya */}
+                    <div style={styles.setupCardMacro}>
+                      <div style={styles.setupCardHeader}>
+                        <span style={styles.setupCardTitle}>🟪 KONTEKS MAKRO & SESI</span>
+                        <span style={styles.setupCardSubtitle}>Indikator Tambahan & Sesi</span>
+                      </div>
+                      <div style={styles.pillsRow}>
+                        {taxonomy.filter(t => 
+                          !["H4 Bullish", "H4 Bearish", "H1 Bullish", "H1 Bearish"].includes(t.tag_name) &&
+                          !t.tag_name.includes("(H4)") &&
+                          !t.tag_name.includes("(H1)") &&
+                          !t.tag_name.includes("FIBONACCI")
+                        ).map((tax) => (
+                          <button
+                            type="button"
+                            key={tax.id}
+                            disabled={selectedTrade.is_tagged && countdown === 0}
+                            onClick={() => handleSetupToggle(tax.id)}
+                            style={{
+                              ...styles.pillButton,
+                              ...(selectedSetups.includes(tax.id) ? styles.pillButtonActiveMacro : {}),
+                            }}
+                          >
+                            {tax.tag_name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -784,6 +921,79 @@ const styles = {
     border: "1px solid #7c3aed",
     color: "#ffffff",
     boxShadow: "0 0 8px rgba(124, 58, 237, 0.2)",
+  },
+  setupCardH4: {
+    backgroundColor: "rgba(30, 58, 138, 0.2)",
+    border: "1px solid rgba(59, 130, 246, 0.3)",
+    borderRadius: "12px",
+    padding: "16px",
+  },
+  setupCardH1: {
+    backgroundColor: "rgba(6, 78, 59, 0.2)",
+    border: "1px solid rgba(16, 185, 129, 0.3)",
+    borderRadius: "12px",
+    padding: "16px",
+  },
+  setupCardFib: {
+    backgroundColor: "rgba(120, 53, 15, 0.2)",
+    border: "1px solid rgba(245, 158, 11, 0.3)",
+    borderRadius: "12px",
+    padding: "16px",
+  },
+  setupCardMacro: {
+    backgroundColor: "rgba(88, 28, 135, 0.2)",
+    border: "1px solid rgba(168, 85, 247, 0.3)",
+    borderRadius: "12px",
+    padding: "16px",
+  },
+  setupCardHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: "12px",
+    borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
+    paddingBottom: "8px",
+  },
+  setupCardTitle: {
+    fontSize: "14px",
+    fontWeight: "800",
+    color: "#ffffff",
+    letterSpacing: "0.5px",
+  },
+  setupCardSubtitle: {
+    fontSize: "11px",
+    color: "#94a3b8",
+  },
+  subLabel: {
+    display: "block",
+    fontSize: "12px",
+    fontWeight: "600",
+    color: "#cbd5e1",
+    marginBottom: "8px",
+  },
+  pillButtonActiveH4: {
+    backgroundColor: "rgba(59, 130, 246, 0.3)",
+    border: "1px solid #3b82f6",
+    color: "#ffffff",
+    boxShadow: "0 0 10px rgba(59, 130, 246, 0.4)",
+  },
+  pillButtonActiveH1: {
+    backgroundColor: "rgba(16, 185, 129, 0.3)",
+    border: "1px solid #10b981",
+    color: "#ffffff",
+    boxShadow: "0 0 10px rgba(16, 185, 129, 0.4)",
+  },
+  pillButtonActiveFib: {
+    backgroundColor: "rgba(245, 158, 11, 0.3)",
+    border: "1px solid #f59e0b",
+    color: "#ffffff",
+    boxShadow: "0 0 10px rgba(245, 158, 11, 0.4)",
+  },
+  pillButtonActiveMacro: {
+    backgroundColor: "rgba(168, 85, 247, 0.3)",
+    border: "1px solid #a855f7",
+    color: "#ffffff",
+    boxShadow: "0 0 10px rgba(168, 85, 247, 0.4)",
   },
   grid: {
     display: "grid",

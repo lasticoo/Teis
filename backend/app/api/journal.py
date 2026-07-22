@@ -72,7 +72,49 @@ def get_minio_client():
 
 def seed_taxonomy_if_empty(db: Session):
     setups = [
-        # Standard SMC & Trading Edge Setups
+        # H4 Timeframe Context & Setups
+        ("H4 Bullish", "Struktur/Tren Timeframe 4 Jam cenderung Naik."),
+        ("H4 Bearish", "Struktur/Tren Timeframe 4 Jam cenderung Turun."),
+        ("OB BULLISH (H4)", "Order Block Bullish pada timeframe H4 (4 Jam)."),
+        ("OB BEARISH (H4)", "Order Block Bearish pada timeframe H4 (4 Jam)."),
+        ("POI (H4)", "Point of Interest (Liquidity Sweep + Order Block) pada timeframe H4."),
+        ("Liquidity Sweep (H4)", "Penyapuan likuiditas pada timeframe H4."),
+        ("Order Block (H4)", "Order Block pada timeframe H4."),
+        ("FVG (H4)", "Fair Value Gap / Imbalance pada timeframe H4."),
+        ("CHOCH (H4)", "Change of Character pada timeframe H4."),
+        ("BOS (H4)", "Break of Structure pada timeframe H4."),
+        ("Equal High / Low (H4)", "Equal High / Equal Low pada timeframe H4."),
+        ("Supply / Demand (H4)", "Zona Supply / Demand pada timeframe H4."),
+        ("Breaker Block (H4)", "Breaker Block pada timeframe H4."),
+        ("Mitigation Block (H4)", "Mitigation Block pada timeframe H4."),
+
+        # H1 Timeframe Context & Setups
+        ("H1 Bullish", "Struktur/Tren Timeframe 1 Jam cenderung Naik."),
+        ("H1 Bearish", "Struktur/Tren Timeframe 1 Jam cenderung Turun."),
+        ("OB BULLISH (H1)", "Order Block Bullish pada timeframe H1 (1 Jam)."),
+        ("OB BEARISH (H1)", "Order Block Bearish pada timeframe H1 (1 Jam)."),
+        ("POI (H1)", "Point of Interest (Liquidity Sweep + Order Block) pada timeframe H1."),
+        ("Liquidity Sweep (H1)", "Penyapuan likuiditas pada timeframe H1."),
+        ("Order Block (H1)", "Order Block pada timeframe H1."),
+        ("FVG (H1)", "Fair Value Gap / Imbalance pada timeframe H1."),
+        ("CHOCH (H1)", "Change of Character pada timeframe H1."),
+        ("BOS (H1)", "Break of Structure pada timeframe H1."),
+        ("Equal High / Low (H1)", "Equal High / Equal Low pada timeframe H1."),
+        ("Supply / Demand (H1)", "Zona Supply / Demand pada timeframe H1."),
+        ("Breaker Block (H1)", "Breaker Block pada timeframe H1."),
+        ("Mitigation Block (H1)", "Mitigation Block pada timeframe H1."),
+
+        # Fibonacci Confirmations
+        ("FIBONACCI 0.382", "Retracement Fibonacci level 38.2%."),
+        ("FIBONACCI 0.618", "Golden Ratio Retracement Fibonacci level 61.8%."),
+        ("FIBONACCI 0.786", "Deep Retracement Fibonacci level 78.6%."),
+
+        # Macro & Session Context
+        ("Premium / Discount Array", "Penetapan harga di area mahal (premium) atau murah (discount)."),
+        ("SMT Divergence", "Divergensi korelasi antar instrumen terkait (misal BTC vs ETH)."),
+        ("Session High / Low Sweep", "Penyapuan harga tertinggi/terendah dari sesi Asia, London, atau New York."),
+
+        # Legacy / Generic Setups
         ("Liquidity Sweep", "Mengambil likuiditas di atas/bawah key level sebelum pembalikan arah."),
         ("Order Block", "Area konsolidasi sebelum ekspansi harga yang kuat."),
         ("FVG (Fair Value Gap)", "Ketidakseimbangan harga / Imbalance antara candle 1 dan candle 3."),
@@ -82,21 +124,9 @@ def seed_taxonomy_if_empty(db: Session):
         ("Supply / Demand Zone", "Zona penawaran/permintaan kuat yang memicu dorongan harga signifikan."),
         ("Breaker Block", "Order block yang tertembus dan berganti fungsi menjadi support/resistance baru."),
         ("Mitigation Block", "Area retracement untuk mengurangi posisi sebelum pergerakan berlanjut."),
-        ("Premium / Discount Array", "Penetapan harga di area mahal (premium) untuk sell atau murah (discount) untuk buy."),
-        ("SMT Divergence", "Divergensi korelasi antar instrumen terkait (misal BTC vs ETH)."),
-        ("Session High / Low Sweep", "Penyapuan harga tertinggi/terendah dari sesi Asia, London, atau New York."),
-        
-        # Specific User Requested Setups
-        ("OB BULLISH", "Order Block Bullish / Area konsolidasi pembeli sebelum lonjakan harga naik."),
-        ("OB BEARISH", "Order Block Bearish / Area konsolidasi penjual sebelum penurunan harga tajam."),
-        ("POI (Liquidity Sweep + Order Block)", "Point of Interest gabungan dari penyapuan likuiditas dan Order Block."),
-        ("FIBONACCI 0.618", "Golden Ratio Retracement Fibonacci 61.8%."),
-        ("FIBONACCI 0.382", "Retracement Fibonacci 38.2%."),
-        ("FIBONACCI 0.786", "Deep Retracement Fibonacci 78.6%."),
-        ("H4 Bearish", "Struktur/Tren Timeframe 4 Jam cenderung Turun (Pilih salah satu H4 Bearish/Bullish)."),
-        ("H4 Bullish", "Struktur/Tren Timeframe 4 Jam cenderung Naik (Pilih salah satu H4 Bearish/Bullish)."),
-        ("H1 Bearish", "Struktur/Tren Timeframe 1 Jam cenderung Turun (Pilih salah satu H1 Bearish/Bullish)."),
-        ("H1 Bullish", "Struktur/Tren Timeframe 1 Jam cenderung Naik (Pilih salah satu H1 Bearish/Bullish).")
+        ("OB BULLISH", "Order Block Bullish."),
+        ("OB BEARISH", "Order Block Bearish."),
+        ("POI (Liquidity Sweep + Order Block)", "Point of Interest gabungan.")
     ]
     existing = {t.tag_name for t in db.query(SetupTaxonomyVersion).all()}
     added = False
