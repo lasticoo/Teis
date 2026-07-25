@@ -165,10 +165,14 @@ class EquitySnapshotService:
         total_trading_pnl = sum((float(t.pnl) for t in closed_trades if t.pnl is not None), 0.0)
         net_return_pct = (total_trading_pnl / net_transfers * 100.0) if net_transfers > 0 else 0.0
 
-        # Build time-series data points by combining trades and snapshots
-        points = []
+        # Calculate Max Drawdown %, Win/Loss Days & Daily Avg PnL ala Binance Mobile
+        max_drawdown_pct = 0.0
+        peak_equity = 0.0
+
+        daily_pnl_map = {}
         cum_pnl = 0.0
         cum_r = 0.0
+        points = []
 
         for t in closed_trades:
             pnl_val = float(t.pnl) if t.pnl is not None else 0.0
@@ -176,26 +180,47 @@ class EquitySnapshotService:
             cum_pnl += pnl_val
             cum_r += r_val
 
+            # Group daily PnL
+            day_str = t.exit_time.strftime("%Y-%m-%d")
+            daily_pnl_map[day_str] = daily_pnl_map.get(day_str, 0.0) + pnl_val
+
             # Transfers up to trade exit time
             trans_at_time = sum((float(tr.amount) for tr in transfers if tr.occurred_at <= t.exit_time), 0.0)
             base_capital = trans_at_time if trans_at_time > 0 else 100.0
             real_equity = base_capital + cum_pnl
+            cum_pnl_pct = (cum_pnl / base_capital * 100.0) if base_capital > 0 else 0.0
+
+            # Max Drawdown calculation
+            if real_equity > peak_equity:
+                peak_equity = real_equity
+            if peak_equity > 0:
+                drawdown = ((peak_equity - real_equity) / peak_equity) * 100.0
+                if drawdown > max_drawdown_pct:
+                    max_drawdown_pct = drawdown
 
             points.append({
                 "timestamp": t.exit_time.isoformat(),
                 "label": t.pair,
                 "cumulative_pnl": round(cum_pnl, 2),
+                "cumulative_pnl_pct": round(cum_pnl_pct, 2),
                 "cumulative_r": round(cum_r, 2),
                 "real_equity": round(real_equity, 2),
                 "net_transfers": round(trans_at_time, 2)
             })
 
-        # If no trade points, create point from latest snapshot
+        # Calculate Win/Loss Days
+        win_days = sum(1 for pnl in daily_pnl_map.values() if pnl > 0)
+        loss_days = sum(1 for pnl in daily_pnl_map.values() if pnl < 0)
+        total_active_days = len(daily_pnl_map) or 1
+        daily_avg_pnl = total_trading_pnl / total_active_days
+
+        # If no trade points, create point from current balance
         if not points:
             points.append({
                 "timestamp": now.isoformat(),
                 "label": "Latest Total Balance",
                 "cumulative_pnl": 0.0,
+                "cumulative_pnl_pct": 0.0,
                 "cumulative_r": 0.0,
                 "real_equity": round(current_balance, 2),
                 "net_transfers": round(net_transfers, 2)
@@ -213,7 +238,11 @@ class EquitySnapshotService:
                 "total_withdrawals": round(total_withdrawals, 2),
                 "net_transfers": round(net_transfers, 2),
                 "real_trading_profit": round(total_trading_pnl, 2),
-                "trading_return_pct": round(net_return_pct, 2)
+                "trading_return_pct": round(net_return_pct, 2),
+                "max_drawdown_pct": round(max_drawdown_pct, 2),
+                "win_days": win_days,
+                "loss_days": loss_days,
+                "daily_avg_pnl": round(daily_avg_pnl, 2)
             },
             "data_points": points
         }

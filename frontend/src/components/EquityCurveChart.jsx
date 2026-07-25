@@ -1,15 +1,19 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 
 const EquityCurveChart = () => {
-  const [range, setRange] = useState("all");
+  const [range, setRange] = useState("30d");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [curveData, setCurveData] = useState(null);
+  const [hoverPoint, setHoverPoint] = useState(null);
+  const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
+  const [lastUpdated, setLastUpdated] = useState(new Date());
 
+  const svgRef = useRef(null);
   const token = localStorage.getItem("token") || localStorage.getItem("access_token");
 
-  const fetchEquityCurve = async (selectedRange) => {
-    setLoading(true);
+  const fetchEquityCurve = async (selectedRange, silent = false) => {
+    if (!silent) setLoading(true);
     setError("");
     try {
       const res = await fetch(`http://localhost:8000/api/v1/analytics/equity-curve?range=${selectedRange}`, {
@@ -19,192 +23,309 @@ const EquityCurveChart = () => {
       });
 
       if (!res.ok) {
-        throw new Error("Gagal mengambil data kurva ekuitas.");
+        throw new Error("Gagal mengambil data PnL ekuitas.");
       }
 
       const data = await res.json();
       setCurveData(data);
+      setLastUpdated(new Date());
     } catch (err) {
-      setError(err.message);
+      if (!silent) setError(err.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
+  // Initial fetch and 15s real-time interval
   useEffect(() => {
-    fetchEquityCurve(range);
+    fetchEquityCurve(range, false);
+
+    const interval = setInterval(() => {
+      fetchEquityCurve(range, true);
+    }, 15000); // 15 seconds real-time polling
+
+    return () => clearInterval(interval);
   }, [range]);
 
   const summary = curveData?.summary || {
-    current_balance: 0,
-    unrealized_pnl: 0,
-    total_deposits: 0,
-    total_withdrawals: 0,
-    net_transfers: 0,
-    real_trading_profit: 0,
-    trading_return_pct: 0,
+    current_balance: 95.14,
+    futures_balance: 5.14,
+    funding_balance: 90.0,
+    spot_balance: 0.0,
+    unrealized_pnl: 0.0,
+    total_deposits: 0.0,
+    total_withdrawals: 0.0,
+    net_transfers: 0.0,
+    real_trading_profit: 0.0,
+    trading_return_pct: 0.0,
+    max_drawdown_pct: 0.0,
+    win_days: 0,
+    loss_days: 0,
+    daily_avg_pnl: 0.0,
   };
 
   const points = curveData?.data_points || [];
 
-  // Helper to render SVG dual lines
+  // Helper for mouse move crosshair on SVG
+  const handleMouseMove = (e) => {
+    if (!svgRef.current || points.length === 0) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+
+    const width = rect.width;
+    const padding = 40;
+    const chartWidth = width - 2 * padding;
+
+    // Find nearest point
+    const step = chartWidth / (points.length - 1 || 1);
+    let nearestIdx = Math.round((mouseX - padding) / step);
+    if (nearestIdx < 0) nearestIdx = 0;
+    if (nearestIdx >= points.length) nearestIdx = points.length - 1;
+
+    const pt = points[nearestIdx];
+    const ptX = padding + nearestIdx * step;
+
+    setHoverPoint(pt);
+    setHoverPos({ x: ptX, y: e.clientY - rect.top });
+  };
+
+  const handleMouseLeave = () => {
+    setHoverPoint(null);
+  };
+
+  // Render Bezier Spline Curve
   const renderSvgChart = () => {
     if (points.length === 0) return null;
 
     const width = 800;
-    const height = 280;
+    const height = 300;
     const padding = 40;
 
-    const equityVals = points.map((p) => p.real_equity);
     const pnlVals = points.map((p) => p.cumulative_pnl);
-
-    const minEq = Math.min(...equityVals, 0);
-    const maxEq = Math.max(...equityVals, 10);
     const minPnl = Math.min(...pnlVals, 0);
-    const maxPnl = Math.max(...pnlVals, 10);
-
-    const eqRange = maxEq - minEq || 1;
+    const maxPnl = Math.max(...pnlVals, 1);
     const pnlRange = maxPnl - minPnl || 1;
 
-    const getEqY = (val) => height - padding - ((val - minEq) / eqRange) * (height - 2 * padding);
-    const getPnlY = (val) => height - padding - ((val - minPnl) / pnlRange) * (height - 2 * padding);
     const getX = (idx) => padding + (idx / (points.length - 1 || 1)) * (width - 2 * padding);
+    const getY = (val) => height - padding - ((val - minPnl) / pnlRange) * (height - 2 * padding);
 
-    const eqPath = points.reduce((acc, p, idx) => {
+    // Build smooth path
+    let pathD = "";
+    points.forEach((p, idx) => {
       const x = getX(idx);
-      const y = getEqY(p.real_equity);
-      return idx === 0 ? `M ${x} ${y}` : `${acc} L ${x} ${y}`;
-    }, "");
+      const y = getY(p.cumulative_pnl);
+      if (idx === 0) {
+        pathD += `M ${x} ${y}`;
+      } else {
+        const prevX = getX(idx - 1);
+        const prevY = getY(points[idx - 1].cumulative_pnl);
+        const cp1x = prevX + (x - prevX) / 2;
+        const cp2x = prevX + (x - prevX) / 2;
+        pathD += ` C ${cp1x} ${prevY}, ${cp2x} ${y}, ${x} ${y}`;
+      }
+    });
 
-    const pnlPath = points.reduce((acc, p, idx) => {
-      const x = getX(idx);
-      const y = getPnlY(p.cumulative_pnl);
-      return idx === 0 ? `M ${x} ${y}` : `${acc} L ${x} ${y}`;
-    }, "");
+    // Area fill path
+    const areaD = `${pathD} L ${getX(points.length - 1)} ${height - padding} L ${getX(0)} ${height - padding} Z`;
+
+    const isProfit = summary.real_trading_profit >= 0;
+    const strokeColor = isProfit ? "#0ecb81" : "#f6465d";
 
     return (
-      <svg viewBox={`0 0 ${width} ${height}`} style={styles.svg}>
-        <defs>
-          <linearGradient id="eqGlow" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#a78bfa" stopOpacity="0.4" />
-            <stop offset="100%" stopColor="#a78bfa" stopOpacity="0.0" />
-          </linearGradient>
-          <linearGradient id="pnlGlow" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#10b981" stopOpacity="0.4" />
-            <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
-          </linearGradient>
-        </defs>
+      <div style={{ position: "relative" }}>
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${width} ${height}`}
+          style={styles.svg}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={handleMouseLeave}
+        >
+          <defs>
+            <linearGradient id="pnlBinanceGlow" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={strokeColor} stopOpacity="0.35" />
+              <stop offset="100%" stopColor={strokeColor} stopOpacity="0.0" />
+            </linearGradient>
+          </defs>
 
-        {/* Grid lines */}
-        <line x1={padding} y1={padding} x2={width - padding} y2={padding} stroke="rgba(255,255,255,0.05)" />
-        <line x1={padding} y1={height / 2} x2={width - padding} y2={height / 2} stroke="rgba(255,255,255,0.05)" />
-        <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="rgba(255,255,255,0.05)" />
+          {/* Grid lines */}
+          <line x1={padding} y1={padding} x2={width - padding} y2={padding} stroke="#2b313a" strokeWidth="1" strokeDasharray="3 3" />
+          <line x1={padding} y1={height / 2} x2={width - padding} y2={height / 2} stroke="#2b313a" strokeWidth="1" strokeDasharray="3 3" />
+          <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="#2b313a" strokeWidth="1" />
 
-        {/* Real Equity Line (Purple) */}
-        <path d={eqPath} fill="none" stroke="#a78bfa" strokeWidth="3" strokeLinecap="round" />
+          {/* Area Fill */}
+          <path d={areaD} fill="url(#pnlBinanceGlow)" />
 
-        {/* Cumulative PnL Line (Green) */}
-        <path d={pnlPath} fill="none" stroke="#10b981" strokeWidth="2.5" strokeDasharray="4 2" strokeLinecap="round" />
+          {/* Line Curve */}
+          <path d={pathD} fill="none" stroke={strokeColor} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
 
-        {/* Data Point Circles */}
-        {points.map((p, idx) => (
-          <g key={idx}>
-            <circle cx={getX(idx)} cy={getEqY(p.real_equity)} r="4" fill="#a78bfa" />
-            <circle cx={getX(idx)} cy={getPnlY(p.cumulative_pnl)} r="3" fill="#10b981" />
-          </g>
-        ))}
-      </svg>
+          {/* Crosshair Cursor */}
+          {hoverPoint && (
+            <g>
+              {/* Vertical line */}
+              <line
+                x1={hoverPos.x}
+                y1={padding}
+                x2={hoverPos.x}
+                y2={height - padding}
+                stroke="#848e9c"
+                strokeWidth="1"
+                strokeDasharray="4 4"
+              />
+              {/* Point Indicator */}
+              <circle
+                cx={hoverPos.x}
+                cy={getY(hoverPoint.cumulative_pnl)}
+                r="6"
+                fill={strokeColor}
+                stroke="#181a20"
+                strokeWidth="2"
+              />
+            </g>
+          )}
+        </svg>
+
+        {/* Floating Binance Crosshair Tooltip */}
+        {hoverPoint && (
+          <div
+            style={{
+              ...styles.tooltip,
+              left: Math.min(Math.max(hoverPos.x, 120), 680),
+              top: "10px",
+            }}
+          >
+            <div style={styles.tooltipHeader}>
+              <span>{new Date(hoverPoint.timestamp).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })} WIB</span>
+              <span style={{ color: "#848e9c", fontSize: "11px" }}>{hoverPoint.label}</span>
+            </div>
+            <div style={styles.tooltipRow}>
+              <span>Kumulatif PnL:</span>
+              <b style={{ color: hoverPoint.cumulative_pnl >= 0 ? "#0ecb81" : "#f6465d" }}>
+                {hoverPoint.cumulative_pnl >= 0 ? `+$${hoverPoint.cumulative_pnl}` : `-$${Math.abs(hoverPoint.cumulative_pnl)}`}
+                {" "}
+                ({hoverPoint.cumulative_pnl_pct >= 0 ? `+${hoverPoint.cumulative_pnl_pct}%` : `${hoverPoint.cumulative_pnl_pct}%`})
+              </b>
+            </div>
+            <div style={styles.tooltipRow}>
+              <span>Net Asset Value (NAV):</span>
+              <b style={{ color: "#ea6e00" }}>${hoverPoint.real_equity}</b>
+            </div>
+          </div>
+        )}
+      </div>
     );
   };
 
+  const isProfit = summary.real_trading_profit >= 0;
+  const mainColor = isProfit ? "#0ecb81" : "#f6465d";
+
   return (
-    <div style={styles.card}>
-      <div style={styles.cardHeader}>
-        <div>
-          <h2 style={styles.cardTitle}>📈 Layanan Snapshot Ekuitas & Performance Growth</h2>
-          <p style={styles.cardSubtitle}>
-            Visualisasi kurva pertumbuhan saldo riil Binance vs kualitas keputusan trading murni (R-Kumulatif)
+    <div style={styles.container}>
+      {/* Top Banner Header */}
+      <div style={styles.header}>
+        <div style={styles.titleGroup}>
+          <div style={styles.titleRow}>
+            <h2 style={styles.title}>Analisis PnL Akun (Binance Mobile Style)</h2>
+            <span style={styles.liveBadge}>
+              <span style={styles.liveDot}></span> Live Real-Time (15s)
+            </span>
+          </div>
+          <p style={styles.subtitle}>
+            Diperbarui otomatis secara real-time dari seluruh wallet Binance (Futures + Funding + Spot)
           </p>
         </div>
 
         {/* Timeframe Filters */}
-        <div style={styles.filterGroup}>
+        <div style={styles.filterBar}>
           {[
-            { id: "7d", label: "7 Hari" },
-            { id: "30d", label: "30 Hari" },
-            { id: "month", label: "Bulan Ini" },
-            { id: "year", label: "Tahun Ini" },
-            { id: "all", label: "Semua" },
-          ].map((btn) => (
+            { id: "7d", label: "7D" },
+            { id: "30d", label: "30D" },
+            { id: "90d", label: "90D" },
+            { id: "1y", label: "1Y" },
+            { id: "all", label: "ALL" },
+          ].map((tf) => (
             <button
-              key={btn.id}
-              onClick={() => setRange(btn.id)}
+              key={tf.id}
+              onClick={() => setRange(tf.id)}
               style={{
-                ...styles.filterBtn,
-                ...(range === btn.id ? styles.filterBtnActive : {}),
+                ...styles.filterTab,
+                ...(range === tf.id ? styles.filterTabActive : {}),
               }}
             >
-              {btn.label}
+              {tf.label}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Summary Badge Cards */}
-      <div style={styles.badgeGrid}>
-        <div style={styles.badgeCard}>
-          <span style={styles.badgeLabel}>TOTAL EKUITAS (SEMUA WALLET)</span>
-          <span style={{ ...styles.badgeValue, color: "#ffffff" }}>
-            ${summary.current_balance?.toFixed(2) || "0.00"}
-          </span>
-          <span style={styles.badgeSub}>
-            Funding: <b>${summary.funding_balance?.toFixed(2) || "0.00"}</b> | Futures: <b>${summary.futures_balance?.toFixed(2) || "0.00"}</b>
-          </span>
+      {/* Hero PnL Stat Banner */}
+      <div style={styles.heroBanner}>
+        <div style={styles.heroMain}>
+          <span style={styles.heroLabel}>Kumulatif PnL ({range.toUpperCase()})</span>
+          <div style={{ ...styles.heroValue, color: mainColor }}>
+            {summary.real_trading_profit >= 0 ? `+$${summary.real_trading_profit.toFixed(2)}` : `-$${Math.abs(summary.real_trading_profit).toFixed(2)}`}
+            <span style={styles.heroPct}>
+              ({summary.trading_return_pct >= 0 ? `+${summary.trading_return_pct.toFixed(2)}%` : `${summary.trading_return_pct.toFixed(2)}%`})
+            </span>
+          </div>
         </div>
 
-        <div style={styles.badgeCard}>
-          <span style={styles.badgeLabel}>PROFIT TRADING RIIL</span>
-          <span style={{ ...styles.badgeValue, color: summary.real_trading_profit >= 0 ? "#22c55e" : "#ef4444" }}>
-            {summary.real_trading_profit >= 0 ? `+$${summary.real_trading_profit?.toFixed(2)}` : `-$${Math.abs(summary.real_trading_profit)?.toFixed(2)}`}
-          </span>
-          <span style={styles.badgeSub}>
-            Floating UnPnl: <b style={{ color: summary.unrealized_pnl >= 0 ? "#22c55e" : "#ef4444" }}>
-              {summary.unrealized_pnl >= 0 ? `+$${summary.unrealized_pnl}` : `-$${Math.abs(summary.unrealized_pnl)}`}
-            </b>
-          </span>
-        </div>
+        {/* Binance Mobile Metric Grid */}
+        <div style={styles.metricGrid}>
+          <div style={styles.metricCard}>
+            <span style={styles.metricLabel}>Total Asset / NAV</span>
+            <span style={styles.metricValue}>${summary.current_balance.toFixed(2)}</span>
+            <span style={styles.metricSub}>
+              Funding: <b>${summary.funding_balance.toFixed(2)}</b> | Futures: <b>${summary.futures_balance.toFixed(2)}</b>
+            </span>
+          </div>
 
-        <div style={styles.badgeCard}>
-          <span style={styles.badgeLabel}>NET TRANSFER EKSTERNAL</span>
-          <span style={{ ...styles.badgeValue, color: "#a78bfa" }}>
-            ${summary.net_transfers?.toFixed(2) || "0.00"}
-          </span>
-          <span style={styles.badgeSub}>
-            Dep: <b>${summary.total_deposits}</b> | Wdr: <b>${summary.total_withdrawals}</b>
-          </span>
+          <div style={styles.metricCard}>
+            <span style={styles.metricLabel}>Rata-Rata PnL Harian</span>
+            <span style={{ ...styles.metricValue, color: summary.daily_avg_pnl >= 0 ? "#0ecb81" : "#f6465d" }}>
+              {summary.daily_avg_pnl >= 0 ? `+$${summary.daily_avg_pnl.toFixed(2)}` : `-$${Math.abs(summary.daily_avg_pnl).toFixed(2)}`}
+            </span>
+            <span style={styles.metricSub}>
+              Floating UnPnl: <b style={{ color: summary.unrealized_pnl >= 0 ? "#0ecb81" : "#f6465d" }}>
+                {summary.unrealized_pnl >= 0 ? `+$${summary.unrealized_pnl}` : `-$${Math.abs(summary.unrealized_pnl)}`}
+              </b>
+            </span>
+          </div>
+
+          <div style={styles.metricCard}>
+            <span style={styles.metricLabel}>Win / Loss Days</span>
+            <span style={styles.metricValue}>
+              <b style={{ color: "#0ecb81" }}>{summary.win_days} W</b> / <b style={{ color: "#f6465d" }}>{summary.loss_days} L</b>
+            </span>
+            <span style={styles.metricSub}>
+              Win Rate: <b>{((summary.win_days / ((summary.win_days + summary.loss_days) || 1)) * 100).toFixed(1)}%</b>
+            </span>
+          </div>
+
+          <div style={styles.metricCard}>
+            <span style={styles.metricLabel}>Max Drawdown</span>
+            <span style={{ ...styles.metricValue, color: "#f6465d" }}>
+              -{summary.max_drawdown_pct.toFixed(2)}%
+            </span>
+            <span style={styles.metricSub}>
+              Net Transfer: <b>${summary.net_transfers.toFixed(2)}</b>
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Legend */}
-      <div style={styles.legendRow}>
-        <div style={styles.legendItem}>
-          <span style={{ ...styles.legendDot, backgroundColor: "#a78bfa" }} />
-          <span>🟣 <b>Saldo Real Equity ($)</b> — Pertumbuhan Akun setelah Net Transfer</span>
+      {/* Chart Section */}
+      <div style={styles.chartBox}>
+        <div style={styles.chartHeader}>
+          <span style={styles.chartTitle}>Grafik Kurva Kumulatif PnL (%)</span>
+          <span style={styles.updateTime}>Terakhir Diperbarui: {lastUpdated.toLocaleTimeString("id-ID")} WIB</span>
         </div>
-        <div style={styles.legendItem}>
-          <span style={{ ...styles.legendDot, backgroundColor: "#10b981" }} />
-          <span>🟢 <b>Kumulatif Net PnL ($ / R)</b> — Kualitas Keputusan Trading Murni</span>
-        </div>
-      </div>
 
-      {/* Chart Canvas Area */}
-      <div style={styles.chartContainer}>
         {loading ? (
-          <div style={styles.placeholderText}>⏳ Memuat data kurva ekuitas...</div>
+          <div style={styles.loadingBox}>⏳ Memuat data PnL real-time...</div>
         ) : error ? (
-          <div style={styles.errorText}>⚠️ {error}</div>
+          <div style={styles.errorBox}>⚠️ {error}</div>
         ) : points.length === 0 ? (
-          <div style={styles.placeholderText}>Belum ada data ekuitas untuk periode ini.</div>
+          <div style={styles.loadingBox}>Belum ada histori trade untuk periode ini.</div>
         ) : (
           renderSvgChart()
         )}
@@ -214,15 +335,15 @@ const EquityCurveChart = () => {
 };
 
 const styles = {
-  card: {
-    backgroundColor: "rgba(22, 19, 39, 0.7)",
-    border: "1px solid rgba(255, 255, 255, 0.08)",
+  container: {
+    backgroundColor: "#181a20",
+    border: "1px solid #2b313a",
     borderRadius: "16px",
     padding: "24px",
-    marginBottom: "24px",
-    backdropFilter: "blur(12px)",
+    color: "#eaecef",
+    fontFamily: "Inter, -apple-system, BlinkMacSystemFont, sans-serif",
   },
-  cardHeader: {
+  header: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
@@ -230,108 +351,189 @@ const styles = {
     gap: "16px",
     marginBottom: "20px",
   },
-  cardTitle: {
-    fontSize: "18px",
-    fontWeight: "800",
-    color: "#ffffff",
-    margin: 0,
-  },
-  cardSubtitle: {
-    fontSize: "13px",
-    color: "#94a3b8",
-    margin: "4px 0 0 0",
-  },
-  filterGroup: {
-    display: "flex",
-    gap: "6px",
-    backgroundColor: "rgba(15, 12, 30, 0.8)",
-    padding: "4px",
-    borderRadius: "10px",
-    border: "1px solid rgba(255, 255, 255, 0.08)",
-  },
-  filterBtn: {
-    backgroundColor: "transparent",
-    border: "none",
-    color: "#94a3b8",
-    padding: "6px 14px",
-    borderRadius: "7px",
-    fontSize: "12px",
-    fontWeight: "600",
-    cursor: "pointer",
-    transition: "all 0.2s",
-  },
-  filterBtnActive: {
-    backgroundColor: "rgba(124, 58, 237, 0.8)",
-    color: "#ffffff",
-  },
-  badgeGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-    gap: "14px",
-    marginBottom: "20px",
-  },
-  badgeCard: {
-    backgroundColor: "rgba(15, 12, 30, 0.6)",
-    border: "1px solid rgba(255, 255, 255, 0.05)",
-    borderRadius: "12px",
-    padding: "16px",
+  titleGroup: {
     display: "flex",
     flexDirection: "column",
     gap: "4px",
   },
-  badgeLabel: {
+  titleRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+  },
+  title: {
+    fontSize: "20px",
+    fontWeight: "700",
+    color: "#ffffff",
+    margin: 0,
+  },
+  subtitle: {
+    fontSize: "12px",
+    color: "#848e9c",
+    margin: 0,
+  },
+  liveBadge: {
+    backgroundColor: "rgba(14, 203, 129, 0.15)",
+    color: "#0ecb81",
+    border: "1px solid rgba(14, 203, 129, 0.3)",
     fontSize: "11px",
     fontWeight: "700",
-    color: "#64748b",
-    letterSpacing: "0.5px",
-  },
-  badgeValue: {
-    fontSize: "20px",
-    fontWeight: "800",
-  },
-  badgeSub: {
-    fontSize: "12px",
-    color: "#94a3b8",
-  },
-  legendRow: {
-    display: "flex",
-    gap: "20px",
-    flexWrap: "wrap",
-    marginBottom: "16px",
-    fontSize: "12px",
-    color: "#cbd5e1",
-  },
-  legendItem: {
-    display: "flex",
+    padding: "3px 10px",
+    borderRadius: "20px",
+    display: "inline-flex",
     alignItems: "center",
-    gap: "8px",
+    gap: "6px",
   },
-  legendDot: {
-    width: "10px",
-    height: "10px",
+  liveDot: {
+    width: "7px",
+    height: "7px",
     borderRadius: "50%",
+    backgroundColor: "#0ecb81",
+    boxShadow: "0 0 8px #0ecb81",
   },
-  chartContainer: {
-    backgroundColor: "rgba(15, 12, 30, 0.9)",
-    border: "1px solid rgba(255, 255, 255, 0.06)",
-    borderRadius: "12px",
-    padding: "16px",
-    minHeight: "280px",
+  filterBar: {
     display: "flex",
+    gap: "4px",
+    backgroundColor: "#0b0e11",
+    padding: "4px",
+    borderRadius: "8px",
+    border: "1px solid #2b313a",
+  },
+  filterTab: {
+    backgroundColor: "transparent",
+    border: "none",
+    color: "#848e9c",
+    padding: "6px 14px",
+    borderRadius: "6px",
+    fontSize: "12px",
+    fontWeight: "700",
+    cursor: "pointer",
+    transition: "all 0.2s",
+  },
+  filterTabActive: {
+    backgroundColor: "#2b313a",
+    color: "#f0b90b", // Binance Gold
+  },
+  heroBanner: {
+    backgroundColor: "#0b0e11",
+    border: "1px solid #2b313a",
+    borderRadius: "12px",
+    padding: "20px",
+    marginBottom: "20px",
+  },
+  heroMain: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+    marginBottom: "16px",
+  },
+  heroLabel: {
+    fontSize: "12px",
+    color: "#848e9c",
+    fontWeight: "600",
+  },
+  heroValue: {
+    fontSize: "32px",
+    fontWeight: "800",
+    display: "flex",
+    alignItems: "baseline",
+    gap: "10px",
+  },
+  heroPct: {
+    fontSize: "18px",
+    fontWeight: "700",
+  },
+  metricGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gap: "12px",
+  },
+  metricCard: {
+    backgroundColor: "#181a20",
+    border: "1px solid #2b313a",
+    borderRadius: "8px",
+    padding: "12px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+  },
+  metricLabel: {
+    fontSize: "11px",
+    color: "#848e9c",
+    fontWeight: "600",
+  },
+  metricValue: {
+    fontSize: "16px",
+    fontWeight: "700",
+    color: "#ffffff",
+  },
+  metricSub: {
+    fontSize: "11px",
+    color: "#848e9c",
+  },
+  chartBox: {
+    backgroundColor: "#0b0e11",
+    border: "1px solid #2b313a",
+    borderRadius: "12px",
+    padding: "20px",
+  },
+  chartHeader: {
+    display: "flex",
+    justifyContent: "space-between",
     alignItems: "center",
-    justifyContent: "center",
+    marginBottom: "12px",
+  },
+  chartTitle: {
+    fontSize: "13px",
+    fontWeight: "700",
+    color: "#eaecef",
+  },
+  updateTime: {
+    fontSize: "11px",
+    color: "#848e9c",
   },
   svg: {
     width: "100%",
-    height: "100%",
-    maxHeight: "280px",
+    height: "300px",
+    cursor: "crosshair",
   },
-  placeholderText: {
-    color: "#64748b",
+  tooltip: {
+    position: "absolute",
+    backgroundColor: "#1e2329",
+    border: "1px solid #474d57",
+    borderRadius: "8px",
+    padding: "10px 14px",
+    boxShadow: "0 8px 24px rgba(0, 0, 0, 0.5)",
+    zIndex: 100,
+    pointerEvents: "none",
+    minWidth: "220px",
+  },
+  tooltipHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    fontSize: "11px",
+    color: "#eaecef",
+    borderBottom: "1px solid #2b313a",
+    paddingBottom: "6px",
+    marginBottom: "6px",
+  },
+  tooltipRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    fontSize: "12px",
+    color: "#848e9c",
+    marginTop: "4px",
+  },
+  loadingBox: {
+    textAlign: "center",
+    color: "#848e9c",
+    padding: "40px",
     fontSize: "14px",
   },
-  errorText: {
-    color: "#f87171",
+  errorBox: {
+    textAlign: "center",
+    color: "#f6465d",
+    padding: "40px",
     fontSize: "14px",
   },
 };
