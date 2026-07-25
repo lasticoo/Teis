@@ -7,6 +7,7 @@ from sqlalchemy import (
     Numeric,
     DateTime,
     Integer,
+    CHAR,
     ForeignKey,
     Boolean,
     JSON,
@@ -58,6 +59,7 @@ class Trade(Base):
     screenshots = relationship("Screenshot", back_populates="trade", cascade="all, delete-orphan")
     corrections = relationship("TradeCorrection", back_populates="trade", cascade="all, delete-orphan")
     setup_tags = relationship("TradeSetupTag", back_populates="trade", cascade="all, delete-orphan")
+    ai_coach_reviews = relationship("AICoachReview", back_populates="trade", cascade="all, delete-orphan")
 
 
 class ExchangeFill(Base):
@@ -183,7 +185,7 @@ class Screenshot(Base):
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
     trade_id = Column(String(36), ForeignKey('trades.id'), nullable=False)
-    stage = Column(Enum('before_entry', 'during_trade', 'exit'), nullable=False)
+    stage = Column(String(50), nullable=False)
     file_path = Column(String(500), nullable=False)
     uploaded_at = Column(DateTime(timezone=False), nullable=False)
 
@@ -266,9 +268,11 @@ class User(Base):
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
     username = Column(String(50), unique=True, nullable=False)
+    email = Column(String(255), nullable=True)
     password_hash = Column(String(255), nullable=False)
     totp_secret = Column(String(100), nullable=True)
     created_at = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
+
 
 
 class APICredential(Base):
@@ -279,5 +283,67 @@ class APICredential(Base):
     encrypted_api_key = Column(String(500), nullable=False)
     encrypted_api_secret = Column(String(500), nullable=False)
     created_at = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
+
+
+class SystemNotification(Base):
+    __tablename__ = 'system_notifications'
+    __table_args__ = (
+        Index('idx_notif_user_chan', 'user_id', 'channel'),
+        Index('idx_notif_created', 'created_at'),
+        {'extend_existing': True}
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey('users.id'), nullable=True)
+    type = Column(Enum('trade_pending_tag', 'edge_status_change', 'sync_failure'), nullable=False)
+    reference_id = Column(String(36), nullable=True)
+    channel = Column(Enum('in_app', 'web_push', 'email'), nullable=False)
+    message = Column(Text, nullable=False)
+    status = Column(Enum('pending', 'sent', 'failed'), nullable=False, default='pending')
+    error_log = Column(Text, nullable=True)
+    sent_at = Column(DateTime(timezone=False), nullable=True)
+    acknowledged_at = Column(DateTime(timezone=False), nullable=True)
+    created_at = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
+
+    # Relationships
+    user = relationship("User", backref="notifications")
+
+
+class WebPushSubscription(Base):
+    __tablename__ = 'web_push_subscriptions'
+    __table_args__ = (
+        {'extend_existing': True},
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey('users.id'), nullable=False)
+    endpoint = Column(Text, nullable=False)
+    p256dh = Column(String(255), nullable=False)
+    auth = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
+
+    # Relationships
+    user = relationship("User", backref="push_subscriptions")
+
+
+class AICoachReview(Base):
+    __tablename__ = 'ai_coach_reviews'
+    __table_args__ = (
+        {'extend_existing': True},
+    )
+
+    id = Column(CHAR(36), primary_key=True, default=generate_uuid)
+    trade_id = Column(CHAR(36), ForeignKey('trades.id', ondelete='CASCADE'), nullable=False)
+    review_type = Column(String(50), nullable=False, default='post_trade_critique')
+    feedback_markdown = Column(Text, nullable=False)
+    emotion_assessment = Column(String(50), nullable=True)
+    discipline_score = Column(Integer, nullable=True)
+    suggested_action = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
+
+    # Relationships
+    trade = relationship("Trade", back_populates="ai_coach_reviews")
+
+
 
 

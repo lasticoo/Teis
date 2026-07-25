@@ -8,6 +8,8 @@ from app.database import get_db
 from app.api.auth import router as auth_router, settings_router as settings_api_router
 from app.api.trades import router as trades_router
 from app.api.journal import router as journal_router
+from app.api.notifications import router as notifications_router
+from app.api.import_wizard import router as import_wizard_router
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -29,6 +31,17 @@ app.include_router(auth_router, prefix="/api/v1")
 app.include_router(settings_api_router, prefix="/api/v1")
 app.include_router(trades_router, prefix="/api/v1")
 app.include_router(journal_router, prefix="/api/v1")
+app.include_router(notifications_router, prefix="/api/v1")
+app.include_router(import_wizard_router, prefix="/api/v1")
+
+import asyncio
+from app.services.websocket_manager import redis_notification_listener
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(redis_notification_listener())
+
+
 
 @app.get("/")
 def read_root():

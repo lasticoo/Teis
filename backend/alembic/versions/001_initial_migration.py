@@ -190,7 +190,6 @@ def upgrade() -> None:
 
     # 12. TRIGGERS for Immutability
 
-    # Trigger on trades
     op.execute("""
     CREATE TRIGGER before_update_trades
     BEFORE UPDATE ON trades
@@ -199,19 +198,11 @@ def upgrade() -> None:
         IF OLD.locked_at IS NOT NULL THEN
             IF NEW.pair != OLD.pair OR
                NEW.direction != OLD.direction OR
-               NEW.entry_price != OLD.entry_price OR
-               NEW.stop_loss != OLD.stop_loss OR
-               NEW.take_profit != OLD.take_profit OR
-               NEW.margin != OLD.margin OR
-               NEW.leverage != OLD.leverage OR
-               NEW.risk_amount != OLD.risk_amount OR
-               NEW.rr_planned != OLD.rr_planned OR
-               NEW.fee != OLD.fee OR
                NEW.entry_time != OLD.entry_time OR
                NEW.data_source != OLD.data_source OR
                NEW.created_at != OLD.created_at THEN
                 SIGNAL SQLSTATE '45000'
-                SET MESSAGE_TEXT = 'Trade sudah terkunci, gunakan trade_corrections';
+                SET MESSAGE_TEXT = 'Identitas dasar trade terkunci dan tidak dapat diubah';
             END IF;
         END IF;
     END;

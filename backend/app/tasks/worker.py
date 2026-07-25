@@ -15,6 +15,7 @@ from app.services.trade_collection import TradeCollectionService
 
 logger = logging.getLogger(__name__)
 
+
 # Initialize Celery app
 celery_app = Celery(
     "teis_worker",
@@ -29,7 +30,9 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="Asia/Jakarta",
     enable_utc=True,
+    imports=("app.tasks.notification_tasks", "app.tasks.import_tasks")
 )
+
 
 # Polling beat schedule: run poll_open_positions every 30 seconds
 celery_app.conf.beat_schedule = {
@@ -82,12 +85,19 @@ def poll_open_positions():
 
             # Check if this position is already tracked
             if symbol in active_trades_map:
-                # Update SL/TP if changed in Binance
+                # Update SL/TP and live parameters if changed in Binance
                 trade = active_trades_map[symbol]
                 try:
+                    # Update leverage / margin if present
+                    if leverage:
+                        trade.leverage = leverage
+                    if margin:
+                        trade.margin = margin
                     update_sl_tp(db, trade)
+                    db.commit()
                 except Exception as e:
                     logger.error(f"Failed to update SL/TP for active trade {trade.id}: {str(e)}")
+                    db.rollback()
                 continue
 
             # Position is new -> Create Trade shell and link entry fills
@@ -123,9 +133,19 @@ def poll_open_positions():
             except Exception as e:
                 logger.error(f"Failed to fetch SL/TP orders for trade {trade.id}: {str(e)}")
 
-            # Trigger notification banner mock (will be fully implemented in Fitur 8)
-            trigger_notification(db, trade, "trade_pending_tag")
+            # Trigger multi-channel notification (In-App, Web Push, Email)
+            try:
+                from app.services.notification_service import NotificationService
+                NotificationService.send_multi_channel_notification(
+                    db=db,
+                    notification_type="trade_pending_tag",
+                    message=f"⚡ Trade baru terdeteksi di Binance Futures ({symbol} {direction.upper()})! Silakan lakukan Quick-Tag untuk mencatat jurnal Anda.",
+                    reference_id=str(trade.id)
+                )
+            except Exception as e:
+                logger.error(f"Failed to send notification for new trade {trade.id}: {str(e)}")
             db.commit()
+
 
         # 2. Process Closed Positions
         for pair, trade in active_trades_map.items():
@@ -144,9 +164,28 @@ def poll_open_positions():
                     TradeCollectionService.link_trade_fills(db, trade.id)
                 except Exception as e:
                     logger.error(f"Failed to process exit fills for trade {trade.id}: {str(e)}")
-                    trade.exit_price = trade.entry_price
+                    if not trade.exit_price:
+                        trade.exit_price = trade.entry_price
+                    if not trade.exit_time:
+                        trade.exit_time = datetime.now(timezone.utc)
+
+                # Ensure exit_time is explicitly set if missing
+                if trade.exit_time is None:
                     trade.exit_time = datetime.now(timezone.utc)
-                    db.commit()
+
+                db.commit()
+
+                # Trigger multi-channel notification for closed trade
+                try:
+                    from app.services.notification_service import NotificationService
+                    NotificationService.send_multi_channel_notification(
+                        db=db,
+                        notification_type="trade_closed",
+                        message=f"📊 Posisi {pair} telah ditutup di Binance. PnL & Realized RR telah dihitung. Periksa Jurnal Trade Anda.",
+                        reference_id=str(trade.id)
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to send close notification for trade {trade.id}: {str(e)}")
 
                 # Trigger asynchronous task to collect market context
                 logger.info(f"Triggering market context collection for trade {trade.id}...")
@@ -164,31 +203,53 @@ def update_sl_tp(db: Session, trade: Trade):
     # Fetch active orders to identify SL/TP levels
     orders_data = BinanceService.get_open_orders(db, trade.pair)
     
+    sl_types = ["STOP", "STOP_MARKET", "STOP_LOSS", "STOP_LOSS_LIMIT", "TRAILING_STOP_MARKET"]
+    tp_types = ["TAKE_PROFIT", "TAKE_PROFIT_MARKET", "TAKE_PROFIT_LIMIT"]
+
     # 1. Process basic open orders
     for order in orders_data.get("basic", []):
         orig_type = order.get("type", "").upper()
-        stop_price = Decimal(order.get("stopPrice", "0"))
+        stop_p = Decimal(str(order.get("stopPrice", "0")))
+        p = Decimal(str(order.get("price", "0")))
+        trigger_price = stop_p if stop_p > 0 else p
         
-        # Stop loss detection
-        if orig_type in ["STOP", "STOP_MARKET"] and stop_price > 0:
-            trade.stop_loss = stop_price
-            
-        # Take profit detection
-        elif orig_type in ["TAKE_PROFIT", "TAKE_PROFIT_MARKET"] and stop_price > 0:
-            trade.take_profit = stop_price
+        if orig_type in sl_types and trigger_price > 0:
+            trade.stop_loss = trigger_price
+        elif orig_type in tp_types and trigger_price > 0:
+            trade.take_profit = trigger_price
 
     # 2. Process conditional algo open orders
     for order in orders_data.get("algo", []):
         order_type = order.get("orderType", "").upper()
         trigger_price = Decimal(str(order.get("triggerPrice", "0")))
         
-        # Stop loss detection
-        if order_type in ["STOP", "STOP_MARKET"] and trigger_price > 0:
+        if order_type in sl_types and trigger_price > 0:
             trade.stop_loss = trigger_price
-            
-        # Take profit detection
-        elif order_type in ["TAKE_PROFIT", "TAKE_PROFIT_MARKET"] and trigger_price > 0:
+        elif order_type in tp_types and trigger_price > 0:
             trade.take_profit = trigger_price
+
+    # 3. Calculate planned RR and risk_amount if entry and SL exist
+    if trade.stop_loss and trade.entry_price:
+        sl = float(trade.stop_loss)
+        entry_p = float(trade.entry_price)
+        risk_dist = abs(entry_p - sl)
+
+        # Calculate entry quantity from linked entry fills
+        entry_tf = db.query(TradeFill).filter(TradeFill.trade_id == trade.id, TradeFill.role == "entry").all()
+        entry_qty = sum((float(tf.exchange_fill.qty) for tf in entry_tf if tf.exchange_fill), 0.0)
+
+        if risk_dist > 0 and entry_qty > 0:
+            trade.risk_amount = Decimal(str(round(risk_dist * entry_qty, 4)))
+        elif trade.margin and float(trade.margin) > 0:
+            trade.risk_amount = Decimal(str(trade.margin))
+        else:
+            trade.risk_amount = Decimal("1.00")
+
+        if trade.take_profit:
+            tp = float(trade.take_profit)
+            reward_dist = abs(tp - entry_p)
+            if risk_dist > 0:
+                trade.rr_planned = Decimal(str(round(reward_dist / risk_dist, 2)))
 
 def process_fills(db: Session, trade: Trade, fills, role: str):
     processed = []
@@ -215,43 +276,63 @@ def process_fills(db: Session, trade: Trade, fills, role: str):
         ).first()
         
         if not ex_fill:
-            ex_fill = ExchangeFill(
-                symbol=trade.pair,
-                binance_trade_id=trade_id_binance,
-                binance_order_id=order_id_binance,
-                price=Decimal(str(fill["price"])),
-                qty=Decimal(str(fill["qty"])),
-                fee=Decimal(str(fill["commission"])),
-                funding_fee=Decimal("0.0"),  # Funding fee can be calculated in Fitur 10
-                side=fill["side"].upper(),
-                executed_at=datetime.fromtimestamp(int(fill["time"]) / 1000.0, tz=timezone.utc),
-                raw_payload=fill
-            )
-            db.add(ex_fill)
-            db.flush()
+            try:
+                ex_fill = ExchangeFill(
+                    symbol=trade.pair,
+                    binance_trade_id=trade_id_binance,
+                    binance_order_id=order_id_binance,
+                    price=Decimal(str(fill["price"])),
+                    qty=Decimal(str(fill["qty"])),
+                    fee=Decimal(str(fill["commission"])),
+                    funding_fee=Decimal("0.0"),
+                    side=fill["side"].upper(),
+                    executed_at=datetime.fromtimestamp(int(fill["time"]) / 1000.0, tz=timezone.utc),
+                    raw_payload=fill
+                )
+                db.add(ex_fill)
+                db.flush()
+            except Exception:
+                db.rollback()
+                ex_fill = db.query(ExchangeFill).filter(
+                    ExchangeFill.symbol == trade.pair,
+                    ExchangeFill.binance_trade_id == trade_id_binance
+                ).first()
 
-        # Link fill to trade using TradeFill helper
-        link = db.query(TradeFill).filter(
-            TradeFill.trade_id == trade.id,
-            TradeFill.exchange_fill_id == ex_fill.id
-        ).first()
-        
-        if not link:
-            link = TradeFill(
-                trade_id=trade.id,
-                exchange_fill_id=ex_fill.id,
-                role=role
-            )
-            db.add(link)
-            db.flush()
+        if ex_fill:
+            # Link fill to trade using TradeFill helper
+            link = db.query(TradeFill).filter(
+                TradeFill.trade_id == trade.id,
+                TradeFill.exchange_fill_id == ex_fill.id
+            ).first()
             
-        processed.append(ex_fill)
-        
+            if not link:
+                try:
+                    link = TradeFill(
+                        trade_id=trade.id,
+                        exchange_fill_id=ex_fill.id,
+                        role=role
+                    )
+                    db.add(link)
+                    db.flush()
+                except Exception:
+                    db.rollback()
+                
+            processed.append(ex_fill)
+            
     return processed
 
 def trigger_notification(db: Session, trade: Trade, notif_type: str):
-    # Log notifications (stubs, will be integrated with Multi-Channel notifications)
-    logger.info(f"NOTIFICATION STUB: Triggered '{notif_type}' alert for trade {trade.id} ({trade.pair})")
+    from app.services.notification_service import NotificationService
+    msg = f"Trade baru terdeteksi: {trade.pair} ({trade.direction.upper()}). Silakan lakukan Quick-Tag sekarang!"
+    try:
+        NotificationService.send_multi_channel_notification(
+            db=db,
+            notification_type=notif_type,
+            message=msg,
+            reference_id=trade.id
+        )
+    except Exception as e:
+        logger.error(f"Failed to trigger multi-channel notification for trade {trade.id}: {str(e)}")
 
 @celery_app.task(name="tasks.collect_market_context")
 def collect_market_context(trade_id: str):

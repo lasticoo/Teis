@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { useAuth, API_URL } from "../context/AuthContext";
 
+
 const Settings = () => {
   const { getAuthHeader, logout } = useAuth();
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
   const [hasKey, setHasKey] = useState(false);
+  const [email, setEmail] = useState("");
+  const [savingEmail, setSavingEmail] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState({ text: "", type: "" });
@@ -13,7 +16,22 @@ const Settings = () => {
 
   useEffect(() => {
     fetchKeyStatus();
+    fetchProfile();
   }, []);
+
+  const fetchProfile = async () => {
+    try {
+      const response = await fetch(`${API_URL}/settings/profile`, {
+        headers: getAuthHeader(),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.email) setEmail(data.email);
+      }
+    } catch (e) {
+      console.error("Gagal memuat profil pengguna.");
+    }
+  };
 
   const fetchKeyStatus = async () => {
     try {
@@ -30,6 +48,37 @@ const Settings = () => {
       setLoading(false);
     }
   };
+
+  const handleSaveEmail = async (e) => {
+    e.preventDefault();
+    setMessage({ text: "", type: "" });
+    setSavingEmail(true);
+
+    try {
+      const response = await fetch(`${API_URL}/settings/profile`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeader(),
+        },
+        body: JSON.stringify({ email }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.detail || "Gagal menyimpan email.");
+      }
+
+      const data = await response.json();
+      setEmail(data.email);
+      setMessage({ text: "✅ Email pemilik akun berhasil diperbarui! Notifikasi email akan dikirim ke alamat ini.", type: "success" });
+    } catch (err) {
+      setMessage({ text: err.message || "Gagal menyimpan email.", type: "error" });
+    } finally {
+      setSavingEmail(false);
+    }
+  };
+
 
   const handleSaveKeys = async (e) => {
     e.preventDefault();
@@ -69,12 +118,43 @@ const Settings = () => {
   return (
     <div style={styles.container}>
       <div style={styles.mainContent}>
-        <h1 style={styles.pageTitle}>Pengaturan Sistem</h1>
-        <p style={styles.pageSubtitle}>Konfigurasi kredensial Binance API dan preferensi keamanan Anda.</p>
+        {/* Section 1: Email Pemilik Akun */}
+        <div style={{ ...styles.sectionCard, marginBottom: "30px" }}>
+          <div style={styles.sectionHeader}>
+            <h2 style={styles.sectionTitle}>📧 Email Pemilik Akun (Notifikasi Email)</h2>
+            <div style={email ? styles.statusBadgeSynced : styles.statusBadgeNotSynced}>
+              {email ? "Email Terdaftar" : "Email Belum Diisi"}
+            </div>
+          </div>
 
+          <p style={styles.infoText}>
+            Masukkan alamat email aktif Anda. Sistem TEIS akan mengirimkan pemberitahuan <strong>Layanan Notifikasi Multi-Saluran (Email Alert)</strong> ke alamat ini setiap kali ada trade baru atau perubahan status edge.
+          </p>
+
+          <form onSubmit={handleSaveEmail} style={styles.form}>
+            <div style={styles.inputGroup}>
+              <label style={styles.label}>Alamat Email Pemilik Akun</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="contoh: nama.trader@gmail.com"
+                required
+                style={styles.input}
+              />
+            </div>
+
+            <button type="submit" disabled={savingEmail} style={styles.button}>
+              {savingEmail ? "Menyimpan..." : "Simpan Alamat Email"}
+            </button>
+          </form>
+        </div>
+
+        {/* Section 2: Binance API Connection */}
         <div style={styles.sectionCard}>
           <div style={styles.sectionHeader}>
             <h2 style={styles.sectionTitle}>Koneksi API Binance Futures</h2>
+
             <div style={hasKey ? styles.statusBadgeSynced : styles.statusBadgeNotSynced}>
               {hasKey ? "Tersambung (Terdeskripsi)" : "Kunci Belum Ditambahkan"}
             </div>
@@ -133,6 +213,10 @@ const Settings = () => {
             </button>
           </form>
         </div>
+
+
+
+
 
         <div style={styles.footer}>
           <div style={styles.connectionStatus}>

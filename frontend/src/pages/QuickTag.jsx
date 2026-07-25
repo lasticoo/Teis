@@ -20,6 +20,10 @@ const QuickTag = () => {
   const [freeNotes, setFreeNotes] = useState("");
   const [screenshot, setScreenshot] = useState(null);
   const [screenshotPreview, setScreenshotPreview] = useState(null);
+  const [screenshot4h, setScreenshot4h] = useState(null);
+  const [screenshotPreview4h, setScreenshotPreview4h] = useState(null);
+  const [screenshot1h, setScreenshot1h] = useState(null);
+  const [screenshotPreview1h, setScreenshotPreview1h] = useState(null);
 
   // Countdown state
   const [countdown, setCountdown] = useState(null);
@@ -173,7 +177,7 @@ const QuickTag = () => {
     }
   };
 
-  const handleFileChange = (e) => {
+  const handleFileChange = (e, timeframe = "legacy") => {
     if (selectedTrade?.is_tagged && countdown === 0) return; // Locked
 
     const file = e.target.files[0];
@@ -182,10 +186,18 @@ const QuickTag = () => {
         setError("Ukuran file tidak boleh lebih dari 5MB.");
         return;
       }
-      setScreenshot(file);
       const reader = new FileReader();
       reader.onloadend = () => {
-        setScreenshotPreview(reader.result);
+        if (timeframe === "4h") {
+          setScreenshot4h(file);
+          setScreenshotPreview4h(reader.result);
+        } else if (timeframe === "1h") {
+          setScreenshot1h(file);
+          setScreenshotPreview1h(reader.result);
+        } else {
+          setScreenshot(file);
+          setScreenshotPreview(reader.result);
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -215,20 +227,29 @@ const QuickTag = () => {
           body: formData,
         });
       }
+
       localStorage.removeItem("teis_offline_tags");
-      setSuccessMsg("Sinkronisasi offline berhasil diterapkan!");
+      setSuccessMsg("Seluruh tag offline berhasil disinkronkan ke server!");
       fetchPendingData();
     } catch (err) {
-      console.error("Failed to sync offline tags", err);
+      setError("Gagal menyinkronkan data offline: " + err.message);
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!selectedTrade) return;
-
     setError("");
     setSuccessMsg("");
+
+    if (!selectedTrade) {
+      setError("Silakan pilih trade terlebih dahulu.");
+      return;
+    }
+
+    if (selectedSetups.length === 0) {
+      setError("Wajib memilih minimal 1 setup trading.");
+      return;
+    }
 
     const payload = {
       trade_id: selectedTrade.id,
@@ -242,7 +263,6 @@ const QuickTag = () => {
       order_type: orderType,
     };
 
-    // If offline, save to localStorage
     if (!navigator.onLine) {
       const existing = localStorage.getItem("teis_offline_tags");
       const list = existing ? JSON.parse(existing) : [];
@@ -257,6 +277,12 @@ const QuickTag = () => {
       formData.append(key, payload[key]);
     });
 
+    if (screenshot4h) {
+      formData.append("screenshot_before_entry_4h", screenshot4h);
+    }
+    if (screenshot1h) {
+      formData.append("screenshot_before_entry_1h", screenshot1h);
+    }
     if (screenshot) {
       formData.append("screenshot_before_entry", screenshot);
     }
@@ -637,31 +663,22 @@ const QuickTag = () => {
                   </div>
                 </div>
 
-                {/* Screenshot & Notes */}
+                {/* Screenshot 4H & 1H Before Entry */}
                 <div style={styles.grid}>
                   <div style={styles.inputGroup}>
-                    <label style={styles.label}>8. Upload Screenshot Chart Sebelum Entry</label>
+                    <label style={styles.label}>8. Screenshot Chart 4H Sebelum Entry (HTF)</label>
                     <input
                       type="file"
                       accept="image/*"
                       disabled={selectedTrade.is_tagged && countdown === 0}
-                      onChange={handleFileChange}
+                      onChange={(e) => handleFileChange(e, "4h")}
                       style={styles.fileInput}
                     />
-                    {screenshotPreview && (
+                    {screenshotPreview4h && (
                       <div style={styles.previewContainer}>
                         <img
-                          src={screenshotPreview}
-                          alt="Screenshot Preview"
-                          style={styles.previewImage}
-                        />
-                      </div>
-                    )}
-                    {!screenshotPreview && selectedTrade.screenshot_url && (
-                      <div style={styles.previewContainer}>
-                        <img
-                          src={selectedTrade.screenshot_url}
-                          alt="Screenshot Database"
+                          src={screenshotPreview4h}
+                          alt="Preview 4H"
                           style={styles.previewImage}
                         />
                       </div>
@@ -669,7 +686,30 @@ const QuickTag = () => {
                   </div>
 
                   <div style={styles.inputGroup}>
-                    <label style={styles.label}>9. Catatan Bebas Pendek</label>
+                    <label style={styles.label}>9. Screenshot Chart 1H Sebelum Entry (LTF)</label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={selectedTrade.is_tagged && countdown === 0}
+                      onChange={(e) => handleFileChange(e, "1h")}
+                      style={styles.fileInput}
+                    />
+                    {screenshotPreview1h && (
+                      <div style={styles.previewContainer}>
+                        <img
+                          src={screenshotPreview1h}
+                          alt="Preview 1H"
+                          style={styles.previewImage}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Catatan Bebas Trader */}
+                <div style={{ ...styles.grid, marginTop: 12 }}>
+                  <div style={{ ...styles.inputGroup, gridColumn: "1 / -1" }}>
+                    <label style={styles.label}>10. Catatan Bebas Pendek</label>
                     <textarea
                       value={freeNotes}
                       disabled={selectedTrade.is_tagged && countdown === 0}

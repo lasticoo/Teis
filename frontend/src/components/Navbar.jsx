@@ -1,38 +1,119 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate, Link, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import NotificationBanner from "./NotificationBanner";
+import NotificationBell from "./NotificationBell";
+
 
 export default function Navbar() {
   const { logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [pendingCount, setPendingCount] = useState(0);
 
-  const fetchPendingCount = async () => {
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [bannerNotification, setBannerNotification] = useState(null);
+
+  const fetchNotifications = useCallback(async () => {
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("token") || localStorage.getItem("access_token");
       if (!token) return;
 
-      const response = await fetch("http://localhost:8000/api/v1/trades/pending-count", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+      const res = await fetch("http://localhost:8000/api/v1/notifications", {
+        headers: { Authorization: `Bearer ${token}` },
       });
-      if (response.ok) {
-        const data = await response.json();
-        setPendingCount(data.count);
+      if (res.ok) {
+        const data = await res.json();
+        setNotifications(data.notifications || []);
+        setUnreadCount(data.unread_count || 0);
+
+        // Find active pending tag notification for banner
+        const pendingTag = (data.notifications || []).find((n) => n.type === "trade_pending_tag");
+        if (pendingTag) {
+          setBannerNotification(pendingTag);
+        } else if (data.notifications && data.notifications.length > 0) {
+          setBannerNotification(data.notifications[0]);
+        } else {
+          setBannerNotification(null);
+        }
       }
-    } catch (error) {
-      console.error("Gagal mengambil jumlah trade pending:", error);
+    } catch (err) {
+      console.error("Gagal mengambil daftar notifikasi:", err);
+    }
+  }, []);
+
+  const acknowledgeNotification = async (notificationId) => {
+    try {
+      const token = localStorage.getItem("token") || localStorage.getItem("access_token");
+      await fetch(`http://localhost:8000/api/v1/notifications/acknowledge/${notificationId}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+      setUnreadCount((prev) => Math.max(0, prev - 1));
+      if (bannerNotification && bannerNotification.id === notificationId) {
+        setBannerNotification(null);
+      }
+    } catch (err) {
+      console.error("Gagal meng-acknowledge notifikasi:", err);
+    }
+  };
+
+  const acknowledgeAllNotifications = async () => {
+    try {
+      const token = localStorage.getItem("token") || localStorage.getItem("access_token");
+      await fetch("http://localhost:8000/api/v1/notifications/acknowledge-all", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setNotifications([]);
+      setUnreadCount(0);
+      setBannerNotification(null);
+    } catch (err) {
+      console.error("Gagal meng-acknowledge semua notifikasi:", err);
     }
   };
 
   useEffect(() => {
-    fetchPendingCount();
-    // Poll count every 15 seconds to keep Navbar updated
-    const interval = setInterval(fetchPendingCount, 15000);
-    return () => clearInterval(interval);
-  }, []);
+    fetchNotifications();
+
+    // 1. Establish WebSocket connection for real-time alerts
+
+    const token = localStorage.getItem("token") || localStorage.getItem("access_token");
+    const wsUrl = `ws://localhost:8000/api/v1/notifications/ws${token ? `?token=${token}` : ""}`;
+    let socket = null;
+
+    try {
+      socket = new WebSocket(wsUrl);
+
+      socket.onopen = () => {
+        console.log("⚡ Connected to TEIS Real-Time Notification WebSocket.");
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log("🔔 Real-time notification received via WebSocket:", data);
+          fetchNotifications();
+        } catch (e) {
+          console.warn("Raw WS message:", event.data);
+        }
+      };
+
+      socket.onerror = (err) => {
+        console.warn("WebSocket notification error:", err);
+      };
+    } catch (e) {
+      console.warn("Failed to initialize WebSocket:", e);
+    }
+
+    const interval = setInterval(fetchNotifications, 15000);
+
+    return () => {
+      clearInterval(interval);
+      if (socket) socket.close();
+    };
+  }, [fetchNotifications]);
 
   const handleLogout = () => {
     logout();
@@ -40,61 +121,62 @@ export default function Navbar() {
   };
 
   return (
-    <nav style={styles.navbar}>
-      <div style={styles.logoContainer}>
-        <div style={styles.logoGlow}></div>
-        <span style={styles.logoText}>TEIS</span>
-        <span style={styles.logoSub}>Trading Edge</span>
-      </div>
-
-      <div style={styles.navLinks}>
-        <Link
-          to="/journal"
-          style={location.pathname === "/journal" ? styles.activeLink : styles.link}
-        >
-          Daftar Jurnal
-        </Link>
-        <Link
-          to="/quick-tag"
-          style={location.pathname === "/quick-tag" ? styles.activeLink : styles.link}
-        >
-          Quick-Tag
-        </Link>
-        <Link
-          to="/settings"
-          style={location.pathname === "/settings" ? styles.activeLink : styles.link}
-        >
-          Settings
-        </Link>
-      </div>
-
-      <div style={styles.rightSection}>
-        {/* Pending tag notification indicator */}
-        <div 
-          onClick={() => navigate("/quick-tag")}
-          style={styles.notificationWrapper} 
-          title={`${pendingCount} trade perlu ditag`}
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="currentColor"
-            style={pendingCount > 0 ? styles.bellIconActive : styles.bellIcon}
-          >
-            <path fillRule="evenodd" d="M5.25 9a6.75 6.75 0 0 1 13.5 0v.75c0 2.123.8 4.057 2.118 5.52a.75.75 0 0 1-.297 1.206c-1.544.57-3.16.99-4.831 1.243a3.75 3.75 0 1 1-7.48 0 24.585 24.585 0 0 1-4.831-1.244.75.75 0 0 1-.298-1.205A8.217 8.217 0 0 0 5.25 9.75V9Zm4.502 8.9a2.25 2.25 0 1 0 4.496 0 25.057 25.057 0 0 1-4.496 0Z" clipRule="evenodd" />
-          </svg>
-          {pendingCount > 0 && (
-            <span style={styles.badge}>{pendingCount}</span>
-          )}
+    <>
+      <NotificationBanner
+        notification={bannerNotification}
+        onAcknowledge={acknowledgeNotification}
+      />
+      <nav style={styles.navbar}>
+        <div style={styles.logoContainer}>
+          <div style={styles.logoGlow}></div>
+          <span style={styles.logoText}>TEIS</span>
+          <span style={styles.logoSub}>Trading Edge</span>
         </div>
 
-        <button onClick={handleLogout} style={styles.logoutButton}>
-          Keluar
-        </button>
-      </div>
-    </nav>
+        <div style={styles.navLinks}>
+          <Link
+            to="/journal"
+            style={location.pathname === "/journal" ? styles.activeLink : styles.link}
+          >
+            Daftar Jurnal
+          </Link>
+          <Link
+            to="/quick-tag"
+            style={location.pathname === "/quick-tag" ? styles.activeLink : styles.link}
+          >
+            Quick-Tag
+          </Link>
+          <Link
+            to="/import"
+            style={location.pathname === "/import" ? styles.activeLink : styles.link}
+          >
+            Import Historis
+          </Link>
+          <Link
+            to="/settings"
+            style={location.pathname === "/settings" ? styles.activeLink : styles.link}
+          >
+            Settings
+          </Link>
+        </div>
+
+        <div style={styles.rightSection}>
+          <NotificationBell
+            notifications={notifications}
+            unreadCount={unreadCount}
+            onAcknowledge={acknowledgeNotification}
+            onAcknowledgeAll={acknowledgeAllNotifications}
+          />
+
+          <button onClick={handleLogout} style={styles.logoutButton}>
+            Keluar
+          </button>
+        </div>
+      </nav>
+    </>
   );
 }
+
 
 const styles = {
   navbar: {

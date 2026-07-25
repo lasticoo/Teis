@@ -13,5 +13,9 @@ from app.models.models import (
     TradeCorrection,
     EdgeBlueprint,
     User,
-    APICredential
+    APICredential,
+    SystemNotification,
+    WebPushSubscription,
+    AICoachReview
 )
+

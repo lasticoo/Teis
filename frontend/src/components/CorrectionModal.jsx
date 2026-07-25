@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from "react";
 
 const FIELD_OPTIONS = [
-  { value: "screenshot_before_entry", label: "🖼️ Screenshot Chart Sebelum Entry (Before Entry)" },
+  { value: "screenshot_before_entry_4h", label: "🖼️ Screenshot Chart 4H Sebelum Entry (HTF)" },
+  { value: "screenshot_before_entry_1h", label: "🖼️ Screenshot Chart 1H Sebelum Entry (LTF)" },
+  { value: "screenshot_exit_4h", label: "🖼️ Screenshot Chart 4H Setelah Exit (HTF)" },
+  { value: "screenshot_exit_1h", label: "🖼️ Screenshot Chart 1H Setelah Exit (LTF)" },
+  { value: "screenshot_before_entry", label: "🖼️ Screenshot Chart Sebelum Entry (Legacy)" },
   { value: "confidence_level", label: "Tingkat Keyakinan (Confidence Level 1-10)" },
   { value: "plan_adherence", label: "Kepatuhan pada Plan (Plan Adherence)" },
   { value: "psychological_tags", label: "Kondisi Emosional Saat Entry" },
@@ -15,7 +19,7 @@ const FIELD_OPTIONS = [
 ];
 
 const CorrectionModal = ({ isOpen, onClose, trade, onSuccess }) => {
-  const [fieldName, setFieldName] = useState("screenshot_before_entry");
+  const [fieldName, setFieldName] = useState("screenshot_before_entry_4h");
   const [oldValue, setOldValue] = useState("");
   const [newValue, setNewValue] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
@@ -27,9 +31,26 @@ const CorrectionModal = ({ isOpen, onClose, trade, onSuccess }) => {
   const getInitialOldValue = (field, tradeObj) => {
     if (!tradeObj) return "—";
     switch (field) {
-      case "screenshot_before_entry":
+      case "screenshot_before_entry_4h": {
+        const sc = tradeObj.screenshots?.find((s) => s.stage === "before_entry_4h" || s.stage === "before_entry");
+        return sc ? sc.url || `screenshots/${tradeObj.id}/${sc.stage}.webp` : "Belum Ada Screenshot";
+      }
+      case "screenshot_before_entry_1h": {
+        const sc = tradeObj.screenshots?.find((s) => s.stage === "before_entry_1h");
+        return sc ? sc.url || `screenshots/${tradeObj.id}/before_entry_1h.webp` : "Belum Ada Screenshot";
+      }
+      case "screenshot_exit_4h": {
+        const sc = tradeObj.screenshots?.find((s) => s.stage === "exit_4h" || s.stage === "exit");
+        return sc ? sc.url || `screenshots/${tradeObj.id}/${sc.stage}.webp` : "Belum Ada Screenshot";
+      }
+      case "screenshot_exit_1h": {
+        const sc = tradeObj.screenshots?.find((s) => s.stage === "exit_1h");
+        return sc ? sc.url || `screenshots/${tradeObj.id}/exit_1h.webp` : "Belum Ada Screenshot";
+      }
+      case "screenshot_before_entry": {
         const sc = tradeObj.screenshots?.find((s) => s.stage === "before_entry");
-        return sc ? `screenshots/${tradeObj.id}/before_entry.webp` : "Belum Ada Screenshot";
+        return sc ? sc.url || `screenshots/${tradeObj.id}/before_entry.webp` : "Belum Ada Screenshot";
+      }
       case "confidence_level":
         return tradeObj.psychology?.confidence_level !== undefined && tradeObj.psychology?.confidence_level !== null
           ? String(tradeObj.psychology.confidence_level)
@@ -112,17 +133,19 @@ const CorrectionModal = ({ isOpen, onClose, trade, onSuccess }) => {
     setLoading(true);
 
     try {
-      // Specialized upload flow for screenshot_before_entry correction
-      if (fieldName === "screenshot_before_entry") {
+      // Specialized upload flow for screenshot stage corrections
+      if (fieldName.startsWith("screenshot_")) {
         if (!selectedFile) {
-          setError("Silakan pilih file gambar baru untuk koreksi screenshot Sebelum Entry.");
+          setError("Silakan pilih file gambar baru untuk koreksi screenshot.");
           setLoading(false);
           return;
         }
 
+        const stageName = fieldName.replace("screenshot_", "");
+
         const formData = new FormData();
         formData.append("trade_id", trade.id);
-        formData.append("stage", "before_entry");
+        formData.append("stage", stageName);
         formData.append("file", selectedFile);
         formData.append("is_correction", "true");
         formData.append("reason", cleanReason);
@@ -140,7 +163,7 @@ const CorrectionModal = ({ isOpen, onClose, trade, onSuccess }) => {
           throw new Error(data.detail || "Gagal mengunggah koreksi screenshot.");
         }
 
-        setSuccessMsg("✅ Koreksi screenshot Sebelum Entry berhasil dikompresi (WebP 80%) & dicatat di Audit Log!");
+        setSuccessMsg(`✅ Koreksi screenshot ${stageName} berhasil dikompresi (WebP 80%) & dicatat di Audit Log!`);
         setTimeout(() => {
           if (onSuccess) onSuccess();
           onClose();
@@ -190,33 +213,35 @@ const CorrectionModal = ({ isOpen, onClose, trade, onSuccess }) => {
   const reasonLen = reason.trim().length;
 
   const renderNewValueInput = () => {
+    if (fieldName.startsWith("screenshot_")) {
+      return (
+        <div style={styles.filePickerBox}>
+          <label style={styles.filePickerLabel}>
+            📁 Upload Gambar Baru (PNG, JPG, WEBP - Max 5MB)
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) {
+                  setSelectedFile(e.target.files[0]);
+                  setNewValue(e.target.files[0].name);
+                }
+              }}
+              style={{ display: "none" }}
+            />
+          </label>
+          {selectedFile ? (
+            <div style={styles.selectedFilePill}>
+              📷 Terpilih: <b>{selectedFile.name}</b> ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
+            </div>
+          ) : (
+            <span style={styles.filePickerHint}>Klik untuk memilih file chart pengganti</span>
+          )}
+        </div>
+      );
+    }
+
     switch (fieldName) {
-      case "screenshot_before_entry":
-        return (
-          <div style={styles.filePickerBox}>
-            <label style={styles.filePickerLabel}>
-              📁 Upload Gambar Baru (PNG, JPG, WEBP - Max 5MB)
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(e) => {
-                  if (e.target.files && e.target.files[0]) {
-                    setSelectedFile(e.target.files[0]);
-                    setNewValue(e.target.files[0].name);
-                  }
-                }}
-                style={{ display: "none" }}
-              />
-            </label>
-            {selectedFile ? (
-              <div style={styles.selectedFilePill}>
-                📷 Terpilih: <b>{selectedFile.name}</b> ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
-              </div>
-            ) : (
-              <span style={styles.filePickerHint}>Klik untuk memilih file chart pengganti</span>
-            )}
-          </div>
-        );
       case "confidence_level":
         return (
           <select value={newValue} onChange={(e) => setNewValue(e.target.value)} style={styles.select}>

@@ -9,6 +9,8 @@ const Journal = () => {
   const [error, setError] = useState("");
   const [sourceFilter, setSourceFilter] = useState("all"); // 'all', 'binance_sync', 'historical_import'
   const [statusFilter, setStatusFilter] = useState("all"); // 'all', 'open', 'closed'
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [selectedTrade, setSelectedTrade] = useState(null);
 
   const fetchJournalList = async () => {
@@ -17,6 +19,9 @@ const Journal = () => {
     setError("");
     try {
       let url = `http://localhost:8000/api/v1/journal/list?data_source=${sourceFilter}&status_filter=${statusFilter}`;
+      if (startDate) url += `&start_date=${startDate}`;
+      if (endDate) url += `&end_date=${endDate}`;
+
       const res = await fetch(url, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -38,7 +43,7 @@ const Journal = () => {
 
   useEffect(() => {
     fetchJournalList();
-  }, [sourceFilter, statusFilter]);
+  }, [sourceFilter, statusFilter, startDate, endDate]);
 
   // Helper metrics
   const totalTrades = trades.length;
@@ -135,6 +140,31 @@ const Journal = () => {
               <option value="open">Aktif (Open)</option>
               <option value="closed">Selesai (Closed)</option>
             </select>
+
+            <label style={{ ...styles.selectLabel, marginLeft: "12px" }}>Dari:</label>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              style={{ ...styles.select, colorScheme: "dark" }}
+            />
+
+            <label style={{ ...styles.selectLabel, marginLeft: "8px" }}>Sampai:</label>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              style={{ ...styles.select, colorScheme: "dark" }}
+            />
+
+            {(startDate || endDate) && (
+              <button
+                onClick={() => { setStartDate(""); setEndDate(""); }}
+                style={{ ...styles.tab, fontSize: "0.75rem", padding: "4px 8px", marginLeft: "6px" }}
+              >
+                Clear Date
+              </button>
+            )}
           </div>
         </div>
 
@@ -258,7 +288,7 @@ const Journal = () => {
                       </td>
                       <td style={styles.td}>
                         <button
-                          onClick={() => navigate(`/journal/${t.id}`)}
+                          onClick={() => navigate(`/journal/detail/${t.id}`)}
                           style={styles.detailBtnNav}
                         >
                           Lihat Detail →

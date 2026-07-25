@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import List, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 
-from app.models.models import Trade, ExchangeFill, TradeFill
+from app.models.models import Trade, ExchangeFill, TradeFill, TradeExecution
 
 logger = logging.getLogger(__name__)
 
@@ -89,12 +89,24 @@ class TradeCollectionService:
         # Net PnL = Gross PnL - Total Commission Fee - Total Funding Fee
         net_pnl = gross_pnl - total_commission_fee - total_funding_fee
 
-        # Risk amount for RR calculation (fallback to default_risk_amount if 0 or None)
-        risk_amt = (
-            Decimal(str(trade.risk_amount))
-            if (trade.risk_amount and Decimal(str(trade.risk_amount)) > Decimal("0.0"))
-            else default_risk_amount
-        )
+        # Risk amount for RR calculation:
+        # 1. Use explicit trade.risk_amount if provided (> 0)
+        # 2. Or calculate actual dollar risk from Stop Loss distance * entry_qty
+        # 3. Fallback to default_risk_amount ($10.0)
+        calculated_sl_risk = None
+        if trade.stop_loss and trade.entry_price and total_entry_qty > Decimal("0.0"):
+            sl_p = Decimal(str(trade.stop_loss))
+            entry_p = Decimal(str(trade.entry_price))
+            sl_dist = abs(entry_p - sl_p)
+            if sl_dist > Decimal("0.0"):
+                calculated_sl_risk = sl_dist * total_entry_qty
+
+        if trade.risk_amount and Decimal(str(trade.risk_amount)) > Decimal("0.0"):
+            risk_amt = Decimal(str(trade.risk_amount))
+        elif calculated_sl_risk and calculated_sl_risk > Decimal("0.0"):
+            risk_amt = calculated_sl_risk
+        else:
+            risk_amt = default_risk_amount
 
         # Realized RR = Net PnL / Risk Amount
         rr_realized = net_pnl / risk_amt if risk_amt > Decimal("0.0") else Decimal("0.0")
@@ -226,26 +238,43 @@ class TradeCollectionService:
             exec_rec = TradeExecution(trade_id=trade_id, order_type="market")
             db.add(exec_rec)
 
-        if exit_fills and not exec_rec.exit_reason:
+        if exit_fills:
             sl = float(trade.stop_loss) if trade.stop_loss else None
             tp = float(trade.take_profit) if trade.take_profit else None
-            entry_p = float(trade.entry_price)
+            entry_p = float(trade.entry_price) if trade.entry_price else 0.0
             exit_p = float(trade.exit_price) if trade.exit_price else entry_p
+            rr = float(trade.rr_realized) if trade.rr_realized is not None else 0.0
 
-            if sl is not None and abs(exit_p - sl) <= (abs(entry_p - sl) * 0.15 if abs(entry_p - sl) > 0 else 0.001):
+            # 1. Check if Stop Loss was hit (within 3% tolerance of SL distance)
+            is_sl_hit = False
+            if sl is not None and entry_p > 0:
+                sl_dist = abs(entry_p - sl)
+                if sl_dist > 0 and abs(exit_p - sl) <= (sl_dist * 0.03):
+                    is_sl_hit = True
+
+            # 2. Check if Take Profit was hit (within 3% tolerance of TP distance)
+            is_tp_hit = False
+            if tp is not None and entry_p > 0:
+                tp_dist = abs(tp - entry_p)
+                if tp_dist > 0 and abs(exit_p - tp) <= (tp_dist * 0.03):
+                    is_tp_hit = True
+
+            # 3. Check if Breakeven (BE) radius (|RR| <= 0.05R or exit price within 0.08% of entry)
+            is_be_radius = (abs(rr) <= 0.05) or (entry_p > 0 and (abs(exit_p - entry_p) / entry_p) <= 0.0008)
+
+            if is_sl_hit:
                 exec_rec.exit_reason = "stop_loss"
-            elif tp is not None and abs(exit_p - tp) <= (abs(tp - entry_p) * 0.15 if abs(tp - entry_p) > 0 else 0.001):
+            elif is_tp_hit:
                 exec_rec.exit_reason = "take_profit"
-            elif abs(exit_p - entry_p) / (entry_p if entry_p > 0 else 1.0) < 0.0005:
+            elif is_be_radius and exec_rec.moved_to_breakeven:
                 exec_rec.exit_reason = "breakeven"
-                exec_rec.moved_to_breakeven = True
             else:
                 exec_rec.exit_reason = "manual_close"
 
         if trade.stop_loss and trade.entry_price:
             sl = float(trade.stop_loss)
             entry_p = float(trade.entry_price)
-            if (trade.direction == "long" and sl >= entry_p) or (trade.direction == "short" and sl <= entry_p):
+            if (trade.direction == "long" and sl > entry_p) or (trade.direction == "short" and sl < entry_p):
                 exec_rec.moved_to_breakeven = True
 
         db.commit()

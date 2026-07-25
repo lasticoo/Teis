@@ -7,6 +7,7 @@ import Settings from "./pages/Settings";
 import QuickTag from "./pages/QuickTag";
 import Journal from "./pages/Journal";
 import TradeDetail from "./pages/TradeDetail";
+import ImportWizard from "./pages/ImportWizard";
 import Navbar from "./components/Navbar";
 
 // Route wrapper to block unauthenticated users
@@ -71,11 +72,33 @@ function AppContent() {
         }
       />
       <Route
+        path="/journal/detail/:tradeId"
+        element={
+          <ProtectedRoute>
+            <ProtectedLayout>
+              <TradeDetail />
+            </ProtectedLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/journal/:tradeId"
         element={
           <ProtectedRoute>
             <ProtectedLayout>
               <TradeDetail />
+            </ProtectedLayout>
+          </ProtectedRoute>
+        }
+      />
+
+
+      <Route
+        path="/import"
+        element={
+          <ProtectedRoute>
+            <ProtectedLayout>
+              <ImportWizard />
             </ProtectedLayout>
           </ProtectedRoute>
         }

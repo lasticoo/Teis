@@ -14,7 +14,7 @@ const ImageUploader = ({
   const [successMsg, setSuccessMsg] = useState("");
   const [previewUrl, setPreviewUrl] = useState(currentImageUrl);
 
-  const isBeforeEntryLocked = stage === "before_entry" && isLocked;
+  const isBeforeEntryLocked = stage.startsWith("before_entry") && isLocked;
 
   useEffect(() => {
     if (currentImageUrl) {

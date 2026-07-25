@@ -22,3 +22,11 @@ class BinanceKeyRequest(BaseModel):
 class BinanceKeyStatusResponse(BaseModel):
     has_key: bool
     service_name: str
+
+class ProfileResponse(BaseModel):
+    username: str
+    email: str | None = None
+
+class ProfileUpdateRequest(BaseModel):
+    email: str
+

@@ -254,12 +254,6 @@ const TradeDetail = () => {
                 {trade.pnl === null ? "—" : trade.pnl >= 0 ? `+$${trade.pnl.toFixed(2)}` : `-$${Math.abs(trade.pnl).toFixed(2)}`}
               </span>
             </div>
-            <button
-              onClick={() => setShowPosForm(!showPosForm)}
-              style={styles.updatePosHeaderBtn}
-            >
-              📐 {showPosForm ? "Sembunyikan Form Posisi" : "Update Parameter Posisi / Exit"}
-            </button>
             {trade.is_locked && (
               <button
                 onClick={() => setIsCorrectionModalOpen(true)}
@@ -423,7 +417,14 @@ const TradeDetail = () => {
                 </div>
                 <div style={styles.execCardItem}>
                   <span style={styles.execLabel}>Alasan Exit:</span>
-                  <span style={styles.execValue}>{trade.execution.exit_reason || "—"}</span>
+                  <span style={styles.execValue}>
+                    {({
+                      take_profit: "Take Profit (TP)",
+                      stop_loss: "Stop Loss (SL)",
+                      manual_close: "Manual Close",
+                      breakeven: "Break Even"
+                    })[trade.execution.exit_reason] || trade.execution.exit_reason || "—"}
+                  </span>
                 </div>
               </div>
             </div>
@@ -496,154 +497,48 @@ const TradeDetail = () => {
           <MarketContextCard contextData={trade.market_context} tradeId={trade.id} />
         </div>
 
-        {/* Section 3b: Manual Position Update Form */}
-        {(trade.status === "Open" || showPosForm || trade.pnl === null || trade.fee === null || trade.rr_realized === null || trade.stop_loss === null) && (
-          <div style={styles.sectionCard}>
-            <div style={styles.sectionHeader}>
-              <h3 style={styles.sectionTitle}>📐 Update Posisi & Param Exit Manual</h3>
-              <span style={styles.sectionSubtitle}>
-                {trade.is_locked ? "⚠️ Trade terkunci — isi SL/TP, Fee, Exit Price & Hitung PnL/RR diizinkan untuk data objektif" : "Isi SL/TP rencana, Fee, atau tutup posisi & hitung PnL/RR"}
-              </span>
-            </div>
-
-            {posErr && <div style={styles.formError}>{posErr}</div>}
-            {posMsg && <div style={styles.formSuccess}>{posMsg}</div>}
-
-            {/* SL/TP Setter */}
-            <div style={styles.posFormGrid}>
-              <div style={styles.posFormGroup}>
-                <label style={styles.posLabel}>Stop Loss (SL) — harga</label>
-                <input
-                  type="number"
-                  step="any"
-                  placeholder="Contoh: 63000"
-                  value={posForm.stop_loss}
-                  onChange={(e) => setPosForm((p) => ({ ...p, stop_loss: e.target.value }))}
-                  style={styles.posInput}
-                />
-              </div>
-              <div style={styles.posFormGroup}>
-                <label style={styles.posLabel}>Take Profit (TP) — harga</label>
-                <input
-                  type="number"
-                  step="any"
-                  placeholder="Contoh: 67000"
-                  value={posForm.take_profit}
-                  onChange={(e) => setPosForm((p) => ({ ...p, take_profit: e.target.value }))}
-                  style={styles.posInput}
-                />
-              </div>
-              <div style={styles.posFormGroup}>
-                <label style={styles.posLabel}>Total Fee (opsional)</label>
-                <input
-                  type="number"
-                  step="any"
-                  placeholder="Contoh: 1.50"
-                  value={posForm.fee}
-                  onChange={(e) => setPosForm((p) => ({ ...p, fee: e.target.value }))}
-                  style={styles.posInput}
-                />
-              </div>
-            </div>
-            <button
-              style={{ ...styles.posBtn, opacity: posLoading ? 0.6 : 1 }}
-              disabled={posLoading}
-              onClick={() => updatePosition({
-                stop_loss: posForm.stop_loss ? parseFloat(posForm.stop_loss) : undefined,
-                take_profit: posForm.take_profit ? parseFloat(posForm.take_profit) : undefined,
-                fee: posForm.fee ? parseFloat(posForm.fee) : undefined,
-              })}
-            >
-              {posLoading ? "Menyimpan..." : "💾 Simpan SL / TP"}
-            </button>
-
-            {/* Close Position Form */}
-            <div style={styles.divider} />
-            <h4 style={{ ...styles.subCardTitle, marginBottom: "12px" }}>🔒 Tutup Posisi Manual</h4>
-            <div style={styles.posFormGrid}>
-              <div style={styles.posFormGroup}>
-                <label style={styles.posLabel}>Exit Price (harga keluar) *</label>
-                <input
-                  type="number"
-                  step="any"
-                  placeholder="Contoh: 66500"
-                  value={closeForm.exit_price}
-                  onChange={(e) => setCloseForm((p) => ({ ...p, exit_price: e.target.value }))}
-                  style={styles.posInput}
-                />
-              </div>
-              <div style={styles.posFormGroup}>
-                <label style={styles.posLabel}>Total Fee Exit (opsional)</label>
-                <input
-                  type="number"
-                  step="any"
-                  placeholder="Contoh: 2.00"
-                  value={closeForm.fee}
-                  onChange={(e) => setCloseForm((p) => ({ ...p, fee: e.target.value }))}
-                  style={styles.posInput}
-                />
-              </div>
-              <div style={styles.posFormGroup}>
-                <label style={styles.posLabel}>Alasan Exit</label>
-                <select
-                  value={closeForm.exit_reason}
-                  onChange={(e) => setCloseForm((p) => ({ ...p, exit_reason: e.target.value }))}
-                  style={styles.posSelect}
-                >
-                  <option value="take_profit">Take Profit (TP Hit)</option>
-                  <option value="stop_loss">Stop Loss (SL Hit)</option>
-                  <option value="manual_close">Manual Close</option>
-                  <option value="breakeven">Breakeven (BE)</option>
-                </select>
-              </div>
-            </div>
-            <button
-              style={{ ...styles.posBtnClose, opacity: posLoading || !closeForm.exit_price ? 0.5 : 1 }}
-              disabled={posLoading || !closeForm.exit_price}
-              onClick={() => updatePosition({
-                exit_price: parseFloat(closeForm.exit_price),
-                fee: closeForm.fee ? parseFloat(closeForm.fee) : undefined,
-                exit_reason: closeForm.exit_reason,
-              })}
-            >
-              {posLoading ? "Memproses..." : "✅ Tutup Posisi & Hitung PnL / RR"}
-            </button>
-          </div>
-        )}
-
         {/* Section 4: Screenshot & Catatan */}
         <div style={styles.sectionCard}>
           <div style={styles.sectionHeader}>
             <h3 style={styles.sectionTitle}>🖼️ Pengelola Gambar & Screenshot Chart (MinIO S3 WebP 80%)</h3>
             <span style={styles.sectionSubtitle}>
-              Dokumentasi visual chart trading terkompresi otomatis pada 3 tahap eksekusi
+              Dokumentasi visual chart 4H & 1H sebelum entry dan setelah exit
             </span>
           </div>
 
-          <div style={styles.uploadGrid3Cols}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px" }}>
             <ImageUploader
               tradeId={trade.id}
-              stage="before_entry"
-              stageLabel="1. Sebelum Entry (Before Entry)"
-              currentImageUrl={trade.screenshots?.find((s) => s.stage === "before_entry")?.url}
+              stage="before_entry_4h"
+              stageLabel="1. Sebelum Entry — Chart 4H (HTF)"
+              currentImageUrl={trade.screenshots?.find((s) => s.stage === "before_entry_4h" || s.stage === "before_entry")?.url}
               isLocked={trade.is_locked}
               onUploadSuccess={fetchTradeDetail}
             />
 
             <ImageUploader
               tradeId={trade.id}
-              stage="during_trade"
-              stageLabel="2. Saat Trade (During Trade)"
-              currentImageUrl={trade.screenshots?.find((s) => s.stage === "during_trade")?.url}
+              stage="before_entry_1h"
+              stageLabel="2. Sebelum Entry — Chart 1H (LTF)"
+              currentImageUrl={trade.screenshots?.find((s) => s.stage === "before_entry_1h")?.url}
               isLocked={trade.is_locked}
               onUploadSuccess={fetchTradeDetail}
             />
 
             <ImageUploader
               tradeId={trade.id}
-              stage="exit"
-              stageLabel="3. Setelah Exit (After Exit)"
-              currentImageUrl={trade.screenshots?.find((s) => s.stage === "exit")?.url}
+              stage="exit_4h"
+              stageLabel="3. Setelah Exit — Chart 4H (HTF)"
+              currentImageUrl={trade.screenshots?.find((s) => s.stage === "exit_4h" || s.stage === "exit")?.url}
+              isLocked={trade.is_locked}
+              onUploadSuccess={fetchTradeDetail}
+            />
+
+            <ImageUploader
+              tradeId={trade.id}
+              stage="exit_1h"
+              stageLabel="4. Setelah Exit — Chart 1H (LTF)"
+              currentImageUrl={trade.screenshots?.find((s) => s.stage === "exit_1h")?.url}
               isLocked={trade.is_locked}
               onUploadSuccess={fetchTradeDetail}
             />

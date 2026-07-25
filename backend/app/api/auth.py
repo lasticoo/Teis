@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.auth import (
     LoginRequest, LoginResponse, Verify2FARequest, TokenResponse,
-    BinanceKeyRequest, BinanceKeyStatusResponse
+    BinanceKeyRequest, BinanceKeyStatusResponse, ProfileResponse, ProfileUpdateRequest
 )
+
 from app.models.models import User, APICredential
 from app.services.auth import (
     verify_password, verify_totp, create_access_token
@@ -98,3 +99,27 @@ def get_binance_key_status(
         has_key=cred is not None,
         service_name="binance"
     )
+
+@settings_router.get("/profile", response_model=ProfileResponse)
+def get_user_profile(
+    current_user: User = Depends(get_current_user)
+):
+    return ProfileResponse(
+        username=current_user.username,
+        email=current_user.email
+    )
+
+@settings_router.post("/profile", response_model=ProfileResponse)
+def update_user_profile(
+    request: ProfileUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    current_user.email = request.email.strip()
+    db.commit()
+    db.refresh(current_user)
+    return ProfileResponse(
+        username=current_user.username,
+        email=current_user.email
+    )
+

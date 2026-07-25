@@ -154,9 +154,11 @@ def get_pending_trades(db: Session = Depends(get_db), current_user = Depends(get
     # Seed setup options if empty
     seed_taxonomy_if_empty(db)
     
-    # Retrieve ALL active trades (tidak ada exit_time) — termasuk yang sudah terkunci (locked)
-    # agar trader tetap bisa melihat kartu Market Context dari trade yang sedang berjalan
-    trades = db.query(Trade).filter(Trade.exit_time == None).order_by(Trade.entry_time.desc()).all()
+    # Retrieve active live trades (tidak ada exit_time, dan bukan historical_import)
+    trades = db.query(Trade).filter(
+        Trade.exit_time == None,
+        Trade.data_source != 'historical_import'
+    ).order_by(Trade.entry_time.desc()).all()
     taxonomy = db.query(SetupTaxonomyVersion).all()
     
     results = []
@@ -209,12 +211,14 @@ def get_journal_list(
     data_source: Optional[str] = "all",
     pair: Optional[str] = None,
     status_filter: Optional[str] = "all",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
     """
     Returns the complete list of journaled trades with filters for source (Live/Import/Manual),
-    pair, and open/closed status. Includes linked fills, PnL, RR, and market context.
+    pair, status (open/closed), and date range (start_date, end_date). Includes linked fills, PnL, RR, and market context.
     """
     query = db.query(Trade)
 
@@ -229,7 +233,22 @@ def get_journal_list(
     elif status_filter == "closed":
         query = query.filter(Trade.exit_time != None)
 
+    if start_date:
+        try:
+            s_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            query = query.filter(Trade.entry_time >= s_dt)
+        except ValueError:
+            pass
+
+    if end_date:
+        try:
+            e_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+            query = query.filter(Trade.entry_time <= e_dt)
+        except ValueError:
+            pass
+
     trades = query.order_by(Trade.entry_time.desc()).all()
+
 
     badge_map = {
         "binance_sync": "Live",
@@ -295,13 +314,18 @@ def get_journal_list(
             "status": "Closed" if t.exit_time else "Open",
             "is_locked": t.locked_at is not None,
             "is_tagged": t.psychology is not None,
-            "setups": setup_names,
-            "psychology": {
-                "confidence_level": t.psychology.confidence_level,
-                "psychological_tags": t.psychology.psychological_tags,
-                "plan_adherence": t.psychology.plan_adherence,
-                "free_notes": t.psychology.free_notes,
-            } if t.psychology else None,
+            "execution": {
+                "order_type": t.execution.order_type if t.execution else "market",
+                "moved_to_breakeven": t.execution.moved_to_breakeven if t.execution else False,
+                "trailing_stop_used": t.execution.trailing_stop_used if t.execution else False,
+                "exit_reason": t.execution.exit_reason if t.execution else None,
+                "exit_reason_label": {
+                    "take_profit": "Take Profit (TP)",
+                    "stop_loss": "Stop Loss (SL)",
+                    "manual_close": "Manual Close",
+                    "breakeven": "Break Even"
+                }.get(t.execution.exit_reason if t.execution else None, "Manual Close" if t.exit_time else "Belum Exit")
+            } if (t.execution or t.exit_time) else None,
             "screenshot_url": (t.screenshots[0].file_path.replace("minio:9000", "localhost:9000") if t.screenshots and t.screenshots[0].file_path else None),
             "fills": linked_fills,
             "market_context": ctx_data
@@ -322,6 +346,8 @@ async def tag_trade(
     free_notes: str = Form(None),
     order_type: str = Form(...), # limit, market
     screenshot_before_entry: UploadFile = File(None),
+    screenshot_before_entry_4h: UploadFile = File(None),
+    screenshot_before_entry_1h: UploadFile = File(None),
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
@@ -390,110 +416,45 @@ async def tag_trade(
     # Check if this is the first save or an edit
     is_first_save = trade.psychology is None
     
-    # 4. Handle Screenshot Upload
-    screenshot_url = None
-    if screenshot_before_entry:
-        # Validate size (< 5MB)
-        content_size = 0
-        # Read a chunk to check size
-        chunk = await screenshot_before_entry.read(1024 * 1024 * 6) # read up to 6MB
-        content_size = len(chunk)
-        # Reset file cursor for upload
-        await screenshot_before_entry.seek(0)
-        
-        if content_size > 5 * 1024 * 1024:
+    # 4. Handle Screenshot Uploads
+    async def process_and_save_screenshot(upload_file: UploadFile, stage_name: str):
+        if not upload_file:
+            return
+        content_bytes = await upload_file.read()
+        if len(content_bytes) > 5 * 1024 * 1024:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Screenshot file size exceeds 5MB limit."
+                detail=f"Ukuran file screenshot {stage_name} melebihi 5MB."
             )
-            
-        # Validate type
-        content_type = screenshot_before_entry.content_type
-        if content_type not in ["image/png", "image/jpeg", "image/jpg"]:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Screenshot file must be a PNG, JPG, or JPEG image."
-            )
-            
-        # Upload to MinIO
         try:
             s3 = get_minio_client()
-            ext = screenshot_before_entry.filename.split(".")[-1]
-            file_name = f"{uuid.uuid4()}.{ext}"
-            
+            ext = upload_file.filename.split(".")[-1] if "." in upload_file.filename else "png"
+            file_name = f"screenshots/{trade_id}/{stage_name}.{ext}"
             s3.upload_fileobj(
-                screenshot_before_entry.file,
+                io.BytesIO(content_bytes),
                 settings.MINIO_BUCKET_NAME,
                 file_name,
-                ExtraArgs={"ContentType": content_type}
+                ExtraArgs={"ContentType": upload_file.content_type or "image/png"}
             )
-            # Save S3 URL (accessible publicly from host browser)
-            screenshot_url = f"http://localhost:9000/{settings.MINIO_BUCKET_NAME}/{file_name}"
+            sc = db.query(Screenshot).filter(Screenshot.trade_id == trade_id, Screenshot.stage == stage_name).first()
+            if not sc:
+                sc = Screenshot(
+                    id=str(uuid.uuid4()),
+                    trade_id=trade_id,
+                    stage=stage_name,
+                    file_path=file_name,
+                    uploaded_at=datetime.now()
+                )
+                db.add(sc)
+            else:
+                sc.file_path = file_name
+                sc.uploaded_at = datetime.now()
         except Exception as e:
-            logger.error(f"Failed to upload screenshot to MinIO: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to upload screenshot to object storage: {str(e)}"
-            )
+            logger.error(f"Failed to upload {stage_name} screenshot: {e}")
 
-    # 5. Save/Update Psychology
-    psych = trade.psychology
-    if not psych:
-        psych = Psychology(
-            trade_id=trade_id,
-            confidence_level=confidence_level,
-            psychological_tags=psych_tags,
-            plan_adherence=plan_adherence,
-            free_notes=free_notes
-        )
-        db.add(psych)
-    else:
-        psych.confidence_level = confidence_level
-        psych.psychological_tags = psych_tags
-        psych.plan_adherence = plan_adherence
-        psych.free_notes = free_notes
-        
-    # 6. Save/Update Trade Execution (order_type)
-    exec_rec = trade.execution
-    if not exec_rec:
-        exec_rec = TradeExecution(
-            trade_id=trade_id,
-            order_type=order_type,
-            moved_to_breakeven=False,
-            trailing_stop_used=False
-        )
-        db.add(exec_rec)
-    else:
-        exec_rec.order_type = order_type
-        
-    # 7. Update/Create Setup Tags
-    # Clear existing tags
-    db.query(TradeSetupTag).filter(TradeSetupTag.trade_id == trade_id).delete()
-    for setup_id in setup_ids:
-        # Validate that the setup ID is valid in taxonomy
-        tax = db.query(SetupTaxonomyVersion).filter(SetupTaxonomyVersion.id == setup_id).first()
-        if not tax:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Setup taxonomy ID {setup_id} is invalid."
-            )
-        db.add(TradeSetupTag(trade_id=trade_id, taxonomy_version_id=setup_id))
-        
-    # 8. Save Screenshot record
-    if screenshot_url:
-        # Check if a screenshot already exists for this stage
-        sc = db.query(Screenshot).filter(Screenshot.trade_id == trade_id, Screenshot.stage == 'before_entry').first()
-        if not sc:
-            sc = Screenshot(
-                trade_id=trade_id,
-                stage='before_entry',
-                file_path=screenshot_url,
-                uploaded_at=datetime.now()
-            )
-            db.add(sc)
-        else:
-            sc.file_path = screenshot_url
-            sc.uploaded_at = datetime.now()
+    await process_and_save_screenshot(screenshot_before_entry_4h, "before_entry_4h")
+    await process_and_save_screenshot(screenshot_before_entry_1h, "before_entry_1h")
+    await process_and_save_screenshot(screenshot_before_entry, "before_entry")
             
     # 9. Update/Save Market Context (bias_arah_manual and session)
     ctx = trade.market_context
@@ -858,7 +819,7 @@ async def upload_screenshot(
         )
 
     # 2. Validate stage enum
-    allowed_stages = ["before_entry", "during_trade", "exit"]
+    allowed_stages = ["before_entry_4h", "before_entry_1h", "exit_4h", "exit_1h", "before_entry", "during_trade", "exit"]
     if stage not in allowed_stages:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -866,7 +827,7 @@ async def upload_screenshot(
         )
 
     # 2b. Immutability check: 'before_entry' screenshot cannot be modified directly if trade is locked, unless via formal correction
-    if stage == "before_entry" and trade.locked_at is not None:
+    if stage.startswith("before_entry") and trade.locked_at is not None:
         if not is_correction:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
