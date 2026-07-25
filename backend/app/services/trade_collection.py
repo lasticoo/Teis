@@ -220,6 +220,34 @@ class TradeCollectionService:
         trade.rr_realized = financials["rr_realized"]
         trade.risk_amount = financials["risk_amount"]
 
+        # Auto-detect TradeExecution parameters if exit_reason is missing
+        exec_rec = db.query(TradeExecution).filter(TradeExecution.trade_id == trade_id).first()
+        if not exec_rec:
+            exec_rec = TradeExecution(trade_id=trade_id, order_type="market")
+            db.add(exec_rec)
+
+        if exit_fills and not exec_rec.exit_reason:
+            sl = float(trade.stop_loss) if trade.stop_loss else None
+            tp = float(trade.take_profit) if trade.take_profit else None
+            entry_p = float(trade.entry_price)
+            exit_p = float(trade.exit_price) if trade.exit_price else entry_p
+
+            if sl is not None and abs(exit_p - sl) <= (abs(entry_p - sl) * 0.15 if abs(entry_p - sl) > 0 else 0.001):
+                exec_rec.exit_reason = "stop_loss"
+            elif tp is not None and abs(exit_p - tp) <= (abs(tp - entry_p) * 0.15 if abs(tp - entry_p) > 0 else 0.001):
+                exec_rec.exit_reason = "take_profit"
+            elif abs(exit_p - entry_p) / (entry_p if entry_p > 0 else 1.0) < 0.0005:
+                exec_rec.exit_reason = "breakeven"
+                exec_rec.moved_to_breakeven = True
+            else:
+                exec_rec.exit_reason = "manual_close"
+
+        if trade.stop_loss and trade.entry_price:
+            sl = float(trade.stop_loss)
+            entry_p = float(trade.entry_price)
+            if (trade.direction == "long" and sl >= entry_p) or (trade.direction == "short" and sl <= entry_p):
+                exec_rec.moved_to_breakeven = True
+
         db.commit()
         logger.info(
             f"Successfully linked trade {trade_id} ({trade.pair}). "
@@ -233,3 +261,4 @@ class TradeCollectionService:
             "rr_realized": str(trade.rr_realized),
             "total_fee": str(trade.fee),
         }
+

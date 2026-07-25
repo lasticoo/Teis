@@ -96,12 +96,49 @@ const TradeDetail = () => {
   };
 
   const formatHoldingTime = (sec) => {
-    if (sec === null || sec === undefined) return "—";
+    if (sec === null || sec === undefined || isNaN(sec) || sec < 0) return "—";
     if (sec < 60) return `${sec} detik`;
     if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}d`;
     const hours = Math.floor(sec / 3600);
     const mins = Math.floor((sec % 3600) / 60);
+    const days = Math.floor(hours / 24);
+    const remHours = hours % 24;
+    if (days > 0) {
+      return `${days}d ${remHours}j ${mins}m`;
+    }
     return `${hours} jam ${mins} menit`;
+  };
+
+  const formatPrice = (val) => {
+    if (val === null || val === undefined || isNaN(val)) return "—";
+    const num = Number(val);
+    if (num === 0) return "$0";
+    const str = Math.abs(num).toString();
+    const parts = str.split(".");
+    let maxDecimals = 4;
+    if (parts.length === 2) {
+      maxDecimals = Math.max(2, Math.min(8, parts[1].length));
+    }
+    return "$" + num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: maxDecimals });
+  };
+
+  const formatDateTimeWIB = (isoStr) => {
+    if (!isoStr) return "—";
+    try {
+      const d = new Date(isoStr);
+      return new Intl.DateTimeFormat('id-ID', {
+        timeZone: 'Asia/Jakarta',
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      }).format(d) + " WIB";
+    } catch (e) {
+      return isoStr;
+    }
   };
 
   const getSetupStyle = (tag) => {
@@ -202,8 +239,8 @@ const TradeDetail = () => {
               {trade.is_locked && <span style={styles.badgeLocked}>🔒 Terkunci</span>}
             </div>
             <span style={styles.subText}>
-              Entry Time: {new Date(trade.entry_time).toLocaleString()}
-              {trade.exit_time && ` | Exit Time: ${new Date(trade.exit_time).toLocaleString()}`}
+              Entry Time: {formatDateTimeWIB(trade.entry_time)}
+              {trade.exit_time && ` | Exit Time: ${formatDateTimeWIB(trade.exit_time)}`}
             </span>
           </div>
 
@@ -238,24 +275,24 @@ const TradeDetail = () => {
         <div style={styles.metricGrid}>
           <div style={styles.metricCard}>
             <span style={styles.metricLabel}>ENTRY VWAP</span>
-            <span style={styles.metricValue}>${trade.entry_price.toFixed(4)}</span>
+            <span style={styles.metricValue}>{formatPrice(trade.entry_price)}</span>
           </div>
           <div style={styles.metricCard}>
             <span style={styles.metricLabel}>EXIT VWAP</span>
             <span style={styles.metricValue}>
-              {trade.exit_price ? `$${trade.exit_price.toFixed(4)}` : "—"}
+              {trade.exit_price !== null ? formatPrice(trade.exit_price) : "—"}
             </span>
           </div>
           <div style={styles.metricCard}>
             <span style={styles.metricLabel}>STOP LOSS</span>
             <span style={{ ...styles.metricValue, color: trade.stop_loss ? "#f87171" : "#64748b" }}>
-              {trade.stop_loss ? `$${trade.stop_loss.toFixed(4)}` : "—"}
+              {trade.stop_loss ? formatPrice(trade.stop_loss) : "—"}
             </span>
           </div>
           <div style={styles.metricCard}>
             <span style={styles.metricLabel}>TAKE PROFIT</span>
             <span style={{ ...styles.metricValue, color: trade.take_profit ? "#34d399" : "#64748b" }}>
-              {trade.take_profit ? `$${trade.take_profit.toFixed(4)}` : "—"}
+              {trade.take_profit ? formatPrice(trade.take_profit) : "—"}
             </span>
           </div>
           <div style={styles.metricCard}>
@@ -279,7 +316,7 @@ const TradeDetail = () => {
           <div style={styles.metricCard}>
             <span style={styles.metricLabel}>TOTAL FEE</span>
             <span style={{ ...styles.metricValue, color: trade.fee !== null ? "#fbbf24" : "#64748b" }}>
-              {trade.fee !== null ? `$${trade.fee.toFixed(4)}` : "—"}
+              {trade.fee !== null ? formatPrice(trade.fee) : "—"}
             </span>
           </div>
           <div style={styles.metricCard}>
@@ -322,7 +359,7 @@ const TradeDetail = () => {
                     <th style={styles.th}>HARGA (PX)</th>
                     <th style={styles.th}>KUANTITAS (QTY)</th>
                     <th style={styles.th}>FEE</th>
-                    <th style={styles.th}>WAKTU EKSEKUSI (UTC)</th>
+                    <th style={styles.th}>WAKTU EKSEKUSI (WIB)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -339,11 +376,11 @@ const TradeDetail = () => {
                           {f.side}
                         </span>
                       </td>
-                      <td style={styles.tdNum}>${f.price.toFixed(4)}</td>
+                      <td style={styles.tdNum}>{formatPrice(f.price)}</td>
                       <td style={styles.tdNum}>{f.qty}</td>
-                      <td style={styles.tdNum}>${f.fee.toFixed(5)}</td>
+                      <td style={styles.tdNum}>{formatPrice(f.fee)}</td>
                       <td style={styles.td}>
-                        {f.executed_at ? new Date(f.executed_at).toLocaleString() : "—"}
+                        {f.executed_at ? formatDateTimeWIB(f.executed_at) : "—"}
                       </td>
                     </tr>
                   ))}
@@ -653,7 +690,7 @@ const TradeDetail = () => {
                       </td>
                       <td style={styles.tdReason}>{c.reason}</td>
                       <td style={styles.td}>
-                        {c.corrected_at ? new Date(c.corrected_at).toLocaleString() : "—"}
+                        {c.corrected_at ? formatDateTimeWIB(c.corrected_at) : "—"}
                       </td>
                     </tr>
                   ))}
