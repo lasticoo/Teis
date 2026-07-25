@@ -1,3 +1,4 @@
+from decimal import Decimal
 from binance.client import Client
 from sqlalchemy.orm import Session
 from app.models.models import APICredential
@@ -95,6 +96,55 @@ class BinanceService:
         if not usdt_bal and balances:
             usdt_bal = balances[0]
         return usdt_bal
+
+    @classmethod
+    def get_all_wallets_balance(cls, db: Session):
+        """
+        Fetches total account balance across Futures, Funding, and Spot wallets.
+        This ensures users keeping funds in Funding Wallet (e.g. $90) + Futures Wallet ($5)
+        have their TRUE total account equity captured accurately.
+        """
+        client = cls.get_client(db)
+
+        fut_balance = Decimal("0")
+        fut_unpnl = Decimal("0")
+        try:
+            fut_balances = client.futures_account_balance()
+            usdt_fut = next((b for b in fut_balances if b.get("asset") == "USDT"), {})
+            fut_balance = Decimal(str(usdt_fut.get("balance", "0")))
+            fut_unpnl = Decimal(str(usdt_fut.get("crossUnPnl", "0")))
+        except Exception as e:
+            logger.warning(f"Failed to fetch futures balance: {e}")
+
+        funding_equity = Decimal("0")
+        try:
+            funding_assets = client._request_margin_api("post", "asset/get-funding-asset", signed=True, data={})
+            usdt_funding = next((a for a in funding_assets if a.get("asset") == "USDT"), {})
+            funding_free = Decimal(str(usdt_funding.get("free", "0")))
+            funding_freeze = Decimal(str(usdt_funding.get("freeze", "0")))
+            funding_equity = funding_free + funding_freeze
+        except Exception as e:
+            logger.warning(f"Failed to fetch funding assets: {e}")
+
+        spot_equity = Decimal("0")
+        try:
+            spot_info = client.get_account()
+            usdt_spot = next((b for b in spot_info.get("balances", []) if b.get("asset") == "USDT"), {})
+            spot_free = Decimal(str(usdt_spot.get("free", "0")))
+            spot_locked = Decimal(str(usdt_spot.get("locked", "0")))
+            spot_equity = spot_free + spot_locked
+        except Exception as e:
+            logger.warning(f"Failed to fetch spot account: {e}")
+
+        total_balance = fut_balance + funding_equity + spot_equity
+
+        return {
+            "total_balance": total_balance,
+            "futures_balance": fut_balance,
+            "funding_balance": funding_equity,
+            "spot_balance": spot_equity,
+            "crossUnPnl": fut_unpnl
+        }
 
     @classmethod
     def get_income_history(cls, db: Session, income_type: str = "TRANSFER", start_time: int = None):

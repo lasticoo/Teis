@@ -15,17 +15,17 @@ class EquitySnapshotService:
     @classmethod
     def capture_snapshot(cls, db: Session) -> Optional[EquitySnapshot]:
         """
-        Fetches current wallet balance & unrealized PnL from Binance API GET /fapi/v2/balance.
+        Fetches total account balance across Futures, Funding, and Spot wallets.
         Validates balance >= 0, then saves record to equity_snapshots table.
         If Binance API fails, logs warning and skips/retries cleanly without inserting zeros or dummy data.
         """
         try:
-            bal_data = BinanceService.get_account_balance(db)
+            bal_data = BinanceService.get_all_wallets_balance(db)
             if not bal_data:
                 logger.warning("[EquityService] Binance account balance returned empty response. Skipping snapshot.")
                 return None
 
-            balance = Decimal(str(bal_data.get("balance", "0")))
+            balance = Decimal(str(bal_data.get("total_balance", "0")))
             unrealized_pnl = Decimal(str(bal_data.get("crossUnPnl", "0")))
 
             if balance < Decimal("0"):
@@ -41,7 +41,7 @@ class EquitySnapshotService:
             db.add(snapshot)
             db.commit()
             db.refresh(snapshot)
-            logger.info(f"[EquityService] Captured equity snapshot: Balance=${balance}, UnPnl=${unrealized_pnl} at {now}")
+            logger.info(f"[EquityService] Captured total equity snapshot across all wallets: Total Balance=${balance}, UnPnl=${unrealized_pnl} at {now}")
             return snapshot
         except Exception as e:
             logger.warning(f"[EquityService] Failed to capture equity snapshot from Binance: {str(e)}")
@@ -153,10 +153,13 @@ class EquitySnapshotService:
         total_withdrawals = sum((abs(float(t.amount)) for t in transfers if float(t.amount) < 0), 0.0)
         net_transfers = total_deposits - total_withdrawals
 
-        # Latest balance
-        latest_snap = db.query(EquitySnapshot).order_by(EquitySnapshot.captured_at.desc()).first()
-        current_balance = float(latest_snap.balance) if latest_snap else 0.0
-        unrealized_pnl = float(latest_snap.unrealized_pnl) if latest_snap else 0.0
+        # Latest balance breakdown across all wallets
+        all_bal = BinanceService.get_all_wallets_balance(db)
+        current_balance = float(all_bal["total_balance"])
+        fut_balance = float(all_bal["futures_balance"])
+        funding_balance = float(all_bal["funding_balance"])
+        spot_balance = float(all_bal["spot_balance"])
+        unrealized_pnl = float(all_bal["crossUnPnl"])
 
         # Calculate pure trading profit
         total_trading_pnl = sum((float(t.pnl) for t in closed_trades if t.pnl is not None), 0.0)
@@ -188,10 +191,10 @@ class EquitySnapshotService:
             })
 
         # If no trade points, create point from latest snapshot
-        if not points and latest_snap:
+        if not points:
             points.append({
-                "timestamp": latest_snap.captured_at.isoformat(),
-                "label": "Latest Balance",
+                "timestamp": now.isoformat(),
+                "label": "Latest Total Balance",
                 "cumulative_pnl": 0.0,
                 "cumulative_r": 0.0,
                 "real_equity": round(current_balance, 2),
@@ -202,6 +205,9 @@ class EquitySnapshotService:
             "range": range_filter,
             "summary": {
                 "current_balance": round(current_balance, 2),
+                "futures_balance": round(fut_balance, 2),
+                "funding_balance": round(funding_balance, 2),
+                "spot_balance": round(spot_balance, 2),
                 "unrealized_pnl": round(unrealized_pnl, 2),
                 "total_deposits": round(total_deposits, 2),
                 "total_withdrawals": round(total_withdrawals, 2),

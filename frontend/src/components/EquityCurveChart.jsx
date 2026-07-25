@@ -153,25 +153,23 @@ const EquityCurveChart = () => {
       {/* Summary Badge Cards */}
       <div style={styles.badgeGrid}>
         <div style={styles.badgeCard}>
-          <span style={styles.badgeLabel}>SALDO REAL (BINANCE)</span>
+          <span style={styles.badgeLabel}>TOTAL EKUITAS (SEMUA WALLET)</span>
           <span style={{ ...styles.badgeValue, color: "#ffffff" }}>
-            ${summary.current_balance.toFixed(2)}
+            ${summary.current_balance?.toFixed(2) || "0.00"}
           </span>
           <span style={styles.badgeSub}>
-            UnPnl: <b style={{ color: summary.unrealized_pnl >= 0 ? "#22c55e" : "#ef4444" }}>
-              {summary.unrealized_pnl >= 0 ? `+$${summary.unrealized_pnl}` : `-$${Math.abs(summary.unrealized_pnl)}`}
-            </b>
+            Funding: <b>${summary.funding_balance?.toFixed(2) || "0.00"}</b> | Futures: <b>${summary.futures_balance?.toFixed(2) || "0.00"}</b>
           </span>
         </div>
 
         <div style={styles.badgeCard}>
           <span style={styles.badgeLabel}>PROFIT TRADING RIIL</span>
           <span style={{ ...styles.badgeValue, color: summary.real_trading_profit >= 0 ? "#22c55e" : "#ef4444" }}>
-            {summary.real_trading_profit >= 0 ? `+$${summary.real_trading_profit.toFixed(2)}` : `-$${Math.abs(summary.real_trading_profit).toFixed(2)}`}
+            {summary.real_trading_profit >= 0 ? `+$${summary.real_trading_profit?.toFixed(2)}` : `-$${Math.abs(summary.real_trading_profit)?.toFixed(2)}`}
           </span>
           <span style={styles.badgeSub}>
-            Return: <b style={{ color: summary.trading_return_pct >= 0 ? "#22c55e" : "#ef4444" }}>
-              {summary.trading_return_pct >= 0 ? `+${summary.trading_return_pct.toFixed(1)}%` : `${summary.trading_return_pct.toFixed(1)}%`}
+            Floating UnPnl: <b style={{ color: summary.unrealized_pnl >= 0 ? "#22c55e" : "#ef4444" }}>
+              {summary.unrealized_pnl >= 0 ? `+$${summary.unrealized_pnl}` : `-$${Math.abs(summary.unrealized_pnl)}`}
             </b>
           </span>
         </div>
@@ -179,7 +177,7 @@ const EquityCurveChart = () => {
         <div style={styles.badgeCard}>
           <span style={styles.badgeLabel}>NET TRANSFER EKSTERNAL</span>
           <span style={{ ...styles.badgeValue, color: "#a78bfa" }}>
-            ${summary.net_transfers.toFixed(2)}
+            ${summary.net_transfers?.toFixed(2) || "0.00"}
           </span>
           <span style={styles.badgeSub}>
             Dep: <b>${summary.total_deposits}</b> | Wdr: <b>${summary.total_withdrawals}</b>
