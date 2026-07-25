@@ -85,3 +85,22 @@ class BinanceService:
             algo_orders = []
             
         return {"basic": basic_orders, "algo": algo_orders}
+
+    @classmethod
+    def get_account_balance(cls, db: Session):
+        client = cls.get_client(db)
+        # GET /fapi/v2/balance
+        balances = client.futures_account_balance()
+        usdt_bal = next((b for b in balances if b.get("asset") == "USDT"), None)
+        if not usdt_bal and balances:
+            usdt_bal = balances[0]
+        return usdt_bal
+
+    @classmethod
+    def get_income_history(cls, db: Session, income_type: str = "TRANSFER", start_time: int = None):
+        client = cls.get_client(db)
+        # GET /fapi/v1/income
+        kwargs = {"incomeType": income_type}
+        if start_time:
+            kwargs["startTime"] = start_time
+        return client.futures_income_history(**kwargs)

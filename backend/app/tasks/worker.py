@@ -34,11 +34,22 @@ celery_app.conf.update(
 )
 
 
-# Polling beat schedule: run poll_open_positions every 30 seconds
+from celery.schedules import crontab
+from app.services.equity_service import EquitySnapshotService
+
+# Polling beat schedule
 celery_app.conf.beat_schedule = {
     "poll_open_positions_every_30s": {
         "task": "tasks.poll_open_positions",
         "schedule": 30.0,
+    },
+    "capture_equity_snapshot_hourly": {
+        "task": "tasks.capture_equity_snapshot",
+        "schedule": crontab(minute=0),
+    },
+    "detect_account_transfers_periodically": {
+        "task": "tasks.detect_account_transfers",
+        "schedule": crontab(minute=15, hour="*/4"),
     }
 }
 
@@ -571,6 +582,34 @@ def link_trade_fills_task(trade_id: str):
     except Exception as e:
         logger.error(f"Error in link_trade_fills task for trade {trade_id}: {str(e)}")
         db.rollback()
+        return {"status": "failed", "error": str(e)}
+    finally:
+        db.close()
+
+
+@celery_app.task(name="tasks.capture_equity_snapshot")
+def capture_equity_snapshot_task():
+    logger.info("Executing periodic capture_equity_snapshot task...")
+    db = SessionLocal()
+    try:
+        snap = EquitySnapshotService.capture_snapshot(db)
+        return {"status": "success", "balance": float(snap.balance) if snap else None}
+    except Exception as e:
+        logger.error(f"Error in capture_equity_snapshot task: {str(e)}")
+        return {"status": "failed", "error": str(e)}
+    finally:
+        db.close()
+
+
+@celery_app.task(name="tasks.detect_account_transfers")
+def detect_account_transfers_task():
+    logger.info("Executing periodic detect_account_transfers task...")
+    db = SessionLocal()
+    try:
+        count = EquitySnapshotService.detect_transfers(db)
+        return {"status": "success", "new_transfers": count}
+    except Exception as e:
+        logger.error(f"Error in detect_account_transfers task: {str(e)}")
         return {"status": "failed", "error": str(e)}
     finally:
         db.close()

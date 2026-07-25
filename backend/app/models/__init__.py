@@ -16,6 +16,8 @@ from app.models.models import (
     APICredential,
     SystemNotification,
     WebPushSubscription,
-    AICoachReview
+    AICoachReview,
+    EquitySnapshot,
+    AccountTransfer
 )
 

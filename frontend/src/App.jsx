@@ -8,6 +8,7 @@ import QuickTag from "./pages/QuickTag";
 import Journal from "./pages/Journal";
 import TradeDetail from "./pages/TradeDetail";
 import ImportWizard from "./pages/ImportWizard";
+import Dashboard from "./pages/Dashboard";
 import Navbar from "./components/Navbar";
 
 // Route wrapper to block unauthenticated users
@@ -36,11 +37,31 @@ function AppContent() {
       {/* Public Routes */}
       <Route
         path="/login"
-        element={isAuthenticated ? <Navigate to="/settings" replace /> : <Login />}
+        element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />}
       />
       <Route path="/verify-2fa" element={<Verify2FA />} />
 
       {/* Protected Routes */}
+      <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <ProtectedLayout>
+              <Dashboard />
+            </ProtectedLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dashboard"
+        element={
+          <ProtectedRoute>
+            <ProtectedLayout>
+              <Dashboard />
+            </ProtectedLayout>
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/settings"
         element={

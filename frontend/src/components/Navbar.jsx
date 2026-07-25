@@ -135,6 +135,12 @@ export default function Navbar() {
 
         <div style={styles.navLinks}>
           <Link
+            to="/dashboard"
+            style={location.pathname === "/dashboard" || location.pathname === "/" ? styles.activeLink : styles.link}
+          >
+            Dasbor
+          </Link>
+          <Link
             to="/journal"
             style={location.pathname === "/journal" ? styles.activeLink : styles.link}
           >
