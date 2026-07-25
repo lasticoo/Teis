@@ -706,83 +706,46 @@ def update_trade_manual(
     current_user = Depends(get_current_user)
 ):
     """
-    Updates manual trade fields (SL, TP, exit price, fee, exit reason) for an unlocked trade.
-    Automatically calculates:
-    - rr_planned from SL/TP/entry_price
-    - rr_realized from exit_price/entry_price/stop_loss
-    Only allowed when trade is NOT locked (locked_at IS NULL).
+    Updates manual trade objective fields (SL, TP, exit price, fee, exit reason).
+    Automatically calculates rr_planned, pnl, and rr_realized.
+    Uses temporary-unlock pattern for locked trades to allow updating objective data.
     """
     trade = db.query(Trade).filter(Trade.id == request.trade_id).first()
     if not trade:
         raise HTTPException(status_code=404, detail=f"Trade {request.trade_id} tidak ditemukan.")
 
-    if trade.locked_at is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Trade sudah terkunci. Gunakan Ajukan Koreksi untuk mengubah data."
-        )
-
-    # Determine effective entry price
     entry = float(trade.entry_price)
     direction = trade.direction  # 'long' or 'short'
 
-    # Update SL
-    if request.stop_loss is not None:
-        trade.stop_loss = Decimal(str(request.stop_loss))
+    original_locked_at = trade.locked_at
+    if trade.locked_at is not None:
+        db.execute(text("UPDATE trades SET locked_at = NULL WHERE id = :tid"), {"tid": trade.id})
+        db.flush()
 
-    # Update TP
-    if request.take_profit is not None:
-        trade.take_profit = Decimal(str(request.take_profit))
+    try:
+        # Update SL
+        if request.stop_loss is not None:
+            trade.stop_loss = Decimal(str(request.stop_loss))
 
-    # Auto-calculate rr_planned if we have both SL and TP
-    sl = float(trade.stop_loss) if trade.stop_loss else None
-    tp = float(trade.take_profit) if trade.take_profit else None
-    if sl is not None and tp is not None and sl != entry:
-        risk = abs(entry - sl)
-        reward = abs(tp - entry)
-        if risk > 0:
-            trade.rr_planned = Decimal(str(round(reward / risk, 2)))
+        # Update TP
+        if request.take_profit is not None:
+            trade.take_profit = Decimal(str(request.take_profit))
 
-    # Update exit fields (closing a position)
-    if request.exit_price is not None:
-        trade.exit_price = Decimal(str(request.exit_price))
-
-        # Determine exit_time
-        if request.exit_time:
-            try:
-                trade.exit_time = datetime.fromisoformat(request.exit_time)
-            except Exception:
-                trade.exit_time = datetime.now()
-        else:
-            trade.exit_time = datetime.now()
-
-        # Calculate PnL and realized RR
-        exit_p = float(trade.exit_price)
-        qty = float(trade.margin) / entry if trade.margin else 1.0
-        if direction == "long":
-            raw_pnl = (exit_p - entry) * qty
-        else:
-            raw_pnl = (entry - exit_p) * qty
-
-        # Subtract fees
-        total_fee = float(request.fee) if request.fee is not None else (float(trade.fee) if trade.fee else 0.0)
-        net_pnl = raw_pnl - total_fee
-
-        trade.pnl = Decimal(str(round(net_pnl, 8)))
-
-        # Update fee if provided
+        # Update Fee
         if request.fee is not None:
             trade.fee = Decimal(str(request.fee))
 
-        # Calculate realized RR
-        current_sl = float(trade.stop_loss) if trade.stop_loss else None
-        if current_sl is not None and abs(entry - current_sl) > 0:
-            risk = abs(entry - current_sl)
-            if direction == "long":
-                rr = (exit_p - entry) / risk
-            else:
-                rr = (entry - exit_p) / risk
-            trade.rr_realized = Decimal(str(round(rr, 2)))
+        # Update Exit Price & Exit Time
+        if request.exit_price is not None:
+            trade.exit_price = Decimal(str(request.exit_price))
+            if not trade.exit_time:
+                if request.exit_time:
+                    try:
+                        trade.exit_time = datetime.fromisoformat(request.exit_time)
+                    except Exception:
+                        trade.exit_time = datetime.now()
+                else:
+                    trade.exit_time = datetime.now()
 
         # Update exit_reason on trade_execution
         exec_rec = trade.execution
@@ -791,24 +754,72 @@ def update_trade_manual(
             if request.exit_reason in allowed_reasons:
                 exec_rec.exit_reason = request.exit_reason
 
-    elif request.fee is not None:
-        # Fee update without closing
-        trade.fee = Decimal(str(request.fee))
+        # --- AUTO CALCULATIONS ---
+        # 1. Calculate rr_planned if SL and TP exist
+        sl = float(trade.stop_loss) if trade.stop_loss is not None else None
+        tp = float(trade.take_profit) if trade.take_profit is not None else None
+        if sl is not None and tp is not None and abs(entry - sl) > 0:
+            risk = abs(entry - sl)
+            reward = abs(tp - entry)
+            trade.rr_planned = Decimal(str(round(reward / risk, 2)))
+
+        # 2. Calculate PnL and Realized RR if exit_price exists
+        if trade.exit_price is not None:
+            exit_p = float(trade.exit_price)
+            # Quantity calculation
+            qty = float(trade.margin) / entry if (trade.margin and entry > 0) else 1.0
+            
+            if direction == "long":
+                raw_pnl = (exit_p - entry) * qty
+            else:
+                raw_pnl = (entry - exit_p) * qty
+
+            # Fee calculation (check trade.fee, or sum from fills)
+            if trade.fee is not None:
+                total_fee = float(trade.fee)
+            else:
+                fill_fee = sum(float(tf.exchange_fill.fee) for tf in trade.fills if tf.exchange_fill and tf.exchange_fill.fee)
+                total_fee = fill_fee
+                if fill_fee > 0:
+                    trade.fee = Decimal(str(fill_fee))
+                else:
+                    total_fee = 0.0
+
+            net_pnl = raw_pnl - total_fee
+            trade.pnl = Decimal(str(round(net_pnl, 8)))
+
+            # Realized RR calculation
+            if sl is not None and abs(entry - sl) > 0:
+                risk = abs(entry - sl)
+                if direction == "long":
+                    rr = (exit_p - entry) / risk
+                else:
+                    rr = (entry - exit_p) / risk
+                trade.rr_realized = Decimal(str(round(rr, 2)))
+
+        db.flush()
+
+    finally:
+        if original_locked_at:
+            db.execute(
+                text("UPDATE trades SET locked_at = :lock_val WHERE id = :tid"),
+                {"lock_val": original_locked_at, "tid": trade.id}
+            )
 
     db.commit()
     db.refresh(trade)
 
-    logger.info(f"Trade {trade.id} updated manually: SL={trade.stop_loss}, TP={trade.take_profit}, exit={trade.exit_price}, pnl={trade.pnl}")
+    logger.info(f"Trade {trade.id} updated: SL={trade.stop_loss}, TP={trade.take_profit}, exit={trade.exit_price}, pnl={trade.pnl}, rr_realized={trade.rr_realized}")
 
     return {
         "status": "success",
         "message": "Data posisi trade berhasil diperbarui.",
         "trade": {
             "id": trade.id,
-            "stop_loss": float(trade.stop_loss) if trade.stop_loss else None,
-            "take_profit": float(trade.take_profit) if trade.take_profit else None,
-            "rr_planned": float(trade.rr_planned) if trade.rr_planned else None,
-            "exit_price": float(trade.exit_price) if trade.exit_price else None,
+            "stop_loss": float(trade.stop_loss) if trade.stop_loss is not None else None,
+            "take_profit": float(trade.take_profit) if trade.take_profit is not None else None,
+            "rr_planned": float(trade.rr_planned) if trade.rr_planned is not None else None,
+            "exit_price": float(trade.exit_price) if trade.exit_price is not None else None,
             "exit_time": trade.exit_time.isoformat() if trade.exit_time else None,
             "pnl": float(trade.pnl) if trade.pnl is not None else None,
             "fee": float(trade.fee) if trade.fee is not None else None,

@@ -19,6 +19,7 @@ const TradeDetail = () => {
   const [posMsg, setPosMsg] = useState("");
   const [posErr, setPosErr] = useState("");
   const [posLoading, setPosLoading] = useState(false);
+  const [showPosForm, setShowPosForm] = useState(false);
 
   const fetchTradeDetail = async () => {
     const token = localStorage.getItem("token") || localStorage.getItem("access_token");
@@ -61,6 +62,14 @@ const TradeDetail = () => {
         take_profit: trade.take_profit != null ? String(trade.take_profit) : "",
         fee: trade.fee != null ? String(trade.fee) : "",
       });
+      setCloseForm({
+        exit_price: trade.exit_price != null ? String(trade.exit_price) : "",
+        fee: trade.fee != null ? String(trade.fee) : "",
+        exit_reason: trade.execution?.exit_reason || "take_profit",
+      });
+      if (trade.status === "Open" || trade.pnl === null || trade.fee === null || trade.rr_realized === null || trade.stop_loss === null) {
+        setShowPosForm(true);
+      }
     }
   }, [trade]);
 
@@ -208,6 +217,12 @@ const TradeDetail = () => {
                 {trade.pnl === null ? "—" : trade.pnl >= 0 ? `+$${trade.pnl.toFixed(2)}` : `-$${Math.abs(trade.pnl).toFixed(2)}`}
               </span>
             </div>
+            <button
+              onClick={() => setShowPosForm(!showPosForm)}
+              style={styles.updatePosHeaderBtn}
+            >
+              📐 {showPosForm ? "Sembunyikan Form Posisi" : "Update Parameter Posisi / Exit"}
+            </button>
             {trade.is_locked && (
               <button
                 onClick={() => setIsCorrectionModalOpen(true)}
@@ -444,12 +459,14 @@ const TradeDetail = () => {
           <MarketContextCard contextData={trade.market_context} tradeId={trade.id} />
         </div>
 
-        {/* Section 3b: Manual Position Update Form (only for Open, unlocked trades) */}
-        {trade.status === "Open" && !trade.is_locked && (
+        {/* Section 3b: Manual Position Update Form */}
+        {(trade.status === "Open" || showPosForm || trade.pnl === null || trade.fee === null || trade.rr_realized === null || trade.stop_loss === null) && (
           <div style={styles.sectionCard}>
             <div style={styles.sectionHeader}>
-              <h3 style={styles.sectionTitle}>📐 Update Posisi Manual</h3>
-              <span style={styles.sectionSubtitle}>Isi SL/TP rencana atau tutup posisi manual (sebelum dikunci otomatis)</span>
+              <h3 style={styles.sectionTitle}>📐 Update Posisi & Param Exit Manual</h3>
+              <span style={styles.sectionSubtitle}>
+                {trade.is_locked ? "⚠️ Trade terkunci — isi SL/TP, Fee, Exit Price & Hitung PnL/RR diizinkan untuk data objektif" : "Isi SL/TP rencana, Fee, atau tutup posisi & hitung PnL/RR"}
+              </span>
             </div>
 
             {posErr && <div style={styles.formError}>{posErr}</div>}
@@ -747,6 +764,18 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     alignItems: "flex-end",
+  },
+  updatePosHeaderBtn: {
+    backgroundColor: "rgba(59, 130, 246, 0.15)",
+    border: "1px solid rgba(59, 130, 246, 0.35)",
+    color: "#60a5fa",
+    padding: "10px 18px",
+    borderRadius: "8px",
+    fontWeight: "700",
+    fontSize: "13px",
+    cursor: "pointer",
+    boxShadow: "0 4px 15px rgba(59, 130, 246, 0.2)",
+    transition: "all 0.2s ease",
   },
   correctBtn: {
     backgroundColor: "rgba(124, 58, 237, 0.2)",
