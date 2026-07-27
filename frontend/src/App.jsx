@@ -9,6 +9,7 @@ import Journal from "./pages/Journal";
 import TradeDetail from "./pages/TradeDetail";
 import ImportWizard from "./pages/ImportWizard";
 import Dashboard from "./pages/Dashboard";
+import EdgeExplorer from "./pages/EdgeExplorer";
 import Navbar from "./components/Navbar";
 
 // Route wrapper to block unauthenticated users
@@ -58,6 +59,16 @@ function AppContent() {
           <ProtectedRoute>
             <ProtectedLayout>
               <Dashboard />
+            </ProtectedLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/edges"
+        element={
+          <ProtectedRoute>
+            <ProtectedLayout>
+              <EdgeExplorer />
             </ProtectedLayout>
           </ProtectedRoute>
         }

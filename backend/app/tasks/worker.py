@@ -36,6 +36,7 @@ celery_app.conf.update(
 
 from celery.schedules import crontab
 from app.services.equity_service import EquitySnapshotService
+from app.services.edge_discovery_engine import EdgeDiscoveryEngine
 
 # Polling beat schedule
 celery_app.conf.beat_schedule = {
@@ -50,8 +51,26 @@ celery_app.conf.beat_schedule = {
     "detect_account_transfers_periodically": {
         "task": "tasks.detect_account_transfers",
         "schedule": crontab(minute=15, hour="*/4"),
+    },
+    "run_edge_discovery_daily": {
+        "task": "tasks.run_edge_discovery_engine",
+        "schedule": crontab(minute=0, hour=2),  # Every day at 02:00 AM WIB
     }
 }
+
+@celery_app.task(name="tasks.run_edge_discovery_engine")
+def run_edge_discovery_engine():
+    logger.info("Starting Celery task run_edge_discovery_engine...")
+    db = SessionLocal()
+    try:
+        res = EdgeDiscoveryEngine.run_discovery(db)
+        logger.info(f"Finished run_edge_discovery_engine task: {res}")
+        return res
+    except Exception as e:
+        logger.error(f"Error in run_edge_discovery_engine task: {e}")
+        return {"status": "error", "message": str(e)}
+    finally:
+        db.close()
 
 @celery_app.task(name="tasks.poll_open_positions")
 def poll_open_positions():

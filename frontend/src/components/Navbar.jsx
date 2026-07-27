@@ -141,6 +141,12 @@ export default function Navbar() {
             Dasbor
           </Link>
           <Link
+            to="/edges"
+            style={location.pathname === "/edges" ? styles.activeLink : styles.link}
+          >
+            Edge Blueprint
+          </Link>
+          <Link
             to="/journal"
             style={location.pathname === "/journal" ? styles.activeLink : styles.link}
           >
@@ -235,20 +241,24 @@ const styles = {
   },
   navLinks: {
     display: "flex",
-    gap: "2rem",
+    alignItems: "center",
+    gap: "1.25rem",
+    flexWrap: "nowrap",
   },
   link: {
     color: "#9ca3af",
     textDecoration: "none",
     fontWeight: 500,
-    fontSize: "0.95rem",
+    fontSize: "0.9rem",
+    whiteSpace: "nowrap",
     transition: "color 0.2s",
   },
   activeLink: {
     color: "#a78bfa",
     textDecoration: "none",
     fontWeight: 600,
-    fontSize: "0.95rem",
+    fontSize: "0.9rem",
+    whiteSpace: "nowrap",
     borderBottom: "2px solid #8b5cf6",
     paddingBottom: "0.25rem",
   },
