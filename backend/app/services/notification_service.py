@@ -50,13 +50,11 @@ class NotificationService:
         for ch in ALLOWED_CHANNELS:
             notif = SystemNotification(
                 id=str(uuid.uuid4()),
-                user_id=user_id,
                 type=notification_type,
                 reference_id=reference_id,
                 channel=ch,
-                message=message.strip(),
-                status="pending",
-                created_at=datetime.now()
+                message=message,
+                sent_at=datetime.now()
             )
             db.add(notif)
             records.append(notif)
@@ -93,7 +91,7 @@ class NotificationService:
                 {
                     "id": r.id,
                     "channel": r.channel,
-                    "status": r.status,
+                    "status": "sent",
                     "celery_task_id": task_dispatches.get(r.channel)
                 }
                 for r in records

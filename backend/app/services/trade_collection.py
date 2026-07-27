@@ -89,26 +89,14 @@ class TradeCollectionService:
         # Net PnL = Gross PnL - Total Commission Fee - Total Funding Fee
         net_pnl = gross_pnl - total_commission_fee - total_funding_fee
 
-        # Risk amount for RR calculation:
-        # 1. Use explicit trade.risk_amount if provided (> 0)
-        # 2. Or calculate actual dollar risk from Stop Loss distance * entry_qty
-        # 3. Fallback to default_risk_amount ($10.0)
-        calculated_sl_risk = None
-        if trade.stop_loss and trade.entry_price and total_entry_qty > Decimal("0.0"):
-            sl_p = Decimal(str(trade.stop_loss))
-            entry_p = Decimal(str(trade.entry_price))
-            sl_dist = abs(entry_p - sl_p)
-            if sl_dist > Decimal("0.0"):
-                calculated_sl_risk = sl_dist * total_entry_qty
+        # Use Dynamic 1R Binance Equity Model (1.0% of Total Binance Equity)
+        try:
+            from app.api.journal import get_dynamic_1r_risk_amount
+            risk_amt = Decimal(str(round(get_dynamic_1r_risk_amount(db, 1.0), 6)))
+        except Exception:
+            risk_amt = Decimal("1.0")
 
-        if trade.risk_amount and Decimal(str(trade.risk_amount)) > Decimal("0.0"):
-            risk_amt = Decimal(str(trade.risk_amount))
-        elif calculated_sl_risk and calculated_sl_risk > Decimal("0.0"):
-            risk_amt = calculated_sl_risk
-        else:
-            risk_amt = default_risk_amount
-
-        # Realized RR = Net PnL / Risk Amount
+        # Realized RR = Net PnL / Dynamic 1R Equity Risk
         rr_realized = net_pnl / risk_amt if risk_amt > Decimal("0.0") else Decimal("0.0")
 
         # Holding Time

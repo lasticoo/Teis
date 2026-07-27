@@ -3,7 +3,9 @@ import { useState, useEffect } from "react";
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const TREND_CONFIG = {
   bull: { label: "BULL 📈", color: "#22c55e", bg: "rgba(34,197,94,0.12)", border: "rgba(34,197,94,0.35)" },
+  bullish: { label: "BULL 📈", color: "#22c55e", bg: "rgba(34,197,94,0.12)", border: "rgba(34,197,94,0.35)" },
   bear: { label: "BEAR 📉", color: "#ef4444", bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.35)" },
+  bearish: { label: "BEAR 📉", color: "#ef4444", bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.35)" },
   range: { label: "RANGE ↔", color: "#f59e0b", bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.35)" },
 };
 

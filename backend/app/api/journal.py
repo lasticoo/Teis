@@ -10,7 +10,7 @@ from typing import List, Optional
 from botocore.client import Config
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, status, Form, UploadFile, File
-from sqlalchemy import text
+from sqlalchemy import text, or_
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError, IntegrityError
 
@@ -75,6 +75,32 @@ def get_minio_client():
         region_name='us-east-1'
     )
     return s3
+
+def get_dynamic_1r_risk_amount(db: Session, risk_percentage: float = 1.0) -> float:
+    """
+    Dynamically fetches total Binance Equity (Funding + Futures + Spot)
+    and calculates 1R Risk amount based on risk_percentage (default 1.0%).
+    Falls back to latest EquitySnapshot if API call fails.
+    """
+    try:
+        from app.services.binance import BinanceService
+        bal = BinanceService.get_all_wallets_balance(db)
+        if bal and bal.get("total_balance"):
+            tot = float(bal["total_balance"])
+            if tot > 0:
+                return max(0.5, tot * (risk_percentage / 100.0))
+    except Exception as e:
+        logger.warning(f"Live Binance balance query failed for 1R calc: {e}")
+
+    try:
+        from app.models.models import EquitySnapshot
+        snap = db.query(EquitySnapshot).order_by(EquitySnapshot.captured_at.desc()).first()
+        if snap and snap.balance and float(snap.balance) > 0:
+            return max(0.5, float(snap.balance) * (risk_percentage / 100.0))
+    except Exception:
+        pass
+
+    return 1.0
 
 def seed_taxonomy_if_empty(db: Session):
     setups = [
@@ -154,25 +180,29 @@ def get_pending_trades(db: Session = Depends(get_db), current_user = Depends(get
     # Seed setup options if empty
     seed_taxonomy_if_empty(db)
     
-    # Retrieve active live trades (tidak ada exit_time, dan bukan historical_import)
-    trades = db.query(Trade).filter(
-        Trade.exit_time == None,
+    # Retrieve active live trades OR trades within 120s correction window (bukan historical_import)
+    all_trades = db.query(Trade).filter(
         Trade.data_source != 'historical_import'
     ).order_by(Trade.entry_time.desc()).all()
     taxonomy = db.query(SetupTaxonomyVersion).all()
     
     results = []
-    for t in trades:
-        # Hitung sisa waktu koreksi jika sudah pernah di-tag
-        seconds_left = None
+    for t in all_trades:
+        is_tagged = t.psychology is not None
         is_locked = t.locked_at is not None
+        seconds_left = None
         
-        if t.psychology and not is_locked:
-            elapsed = (datetime.now() - t.created_at).total_seconds()
-            seconds_left = max(0.0, 120.0 - elapsed)
-        elif is_locked:
-            seconds_left = 0  # Terkunci permanen
-
+        if is_tagged:
+            if is_locked:
+                seconds_left = 0
+            else:
+                elapsed = (datetime.now() - (t.psychology.created_at if hasattr(t.psychology, 'created_at') and t.psychology.created_at else t.created_at)).total_seconds()
+                seconds_left = max(0.0, 120.0 - elapsed)
+            
+            # If 120s window expired or locked, automatically remove from Quick-Tag pending list!
+            if seconds_left <= 0 or is_locked:
+                continue
+        
         results.append({
             "id": t.id,
             "pair": t.pair,
@@ -291,6 +321,22 @@ def get_journal_list(
             "session": ctx.session if ctx else None
         } if ctx else None
 
+        # Format screenshots
+        screenshots_data = []
+        for sc in t.screenshots:
+            fp = sc.file_path or ""
+            if fp.startswith("http://") or fp.startswith("https://"):
+                url = fp.replace("minio:9000", "localhost:9000")
+            else:
+                key = fp if fp.startswith("screenshots/") else f"screenshots/{t.id}/{sc.stage}.webp"
+                url = f"http://localhost:9000/{settings.MINIO_BUCKET_NAME}/{key}"
+            screenshots_data.append({
+                "id": sc.id,
+                "stage": sc.stage,
+                "url": url,
+                "uploaded_at": sc.uploaded_at.isoformat() if sc.uploaded_at else None
+            })
+
         results.append({
             "id": t.id,
             "pair": t.pair,
@@ -312,7 +358,7 @@ def get_journal_list(
             "data_source": t.data_source,
             "source_badge": badge_map.get(t.data_source, "Live"),
             "status": "Closed" if t.exit_time else "Open",
-            "is_locked": t.locked_at is not None,
+            "is_locked": (t.locked_at is not None and t.psychology is not None),
             "is_tagged": t.psychology is not None,
             "execution": {
                 "order_type": t.execution.order_type if t.execution else "market",
@@ -326,7 +372,9 @@ def get_journal_list(
                     "breakeven": "Break Even"
                 }.get(t.execution.exit_reason if t.execution else None, "Manual Close" if t.exit_time else "Belum Exit")
             } if (t.execution or t.exit_time) else None,
-            "screenshot_url": (t.screenshots[0].file_path.replace("minio:9000", "localhost:9000") if t.screenshots and t.screenshots[0].file_path else None),
+            "screenshot_url": (screenshots_data[0]["url"] if screenshots_data else None),
+            "screenshots": screenshots_data,
+            "setups": setup_names,
             "fills": linked_fills,
             "market_context": ctx_data
         })
@@ -359,8 +407,8 @@ async def tag_trade(
             detail="Trade not found."
         )
         
-    # 2. Check if locked
-    if trade.locked_at is not None:
+    # 2. Check if locked (only block if psychology has already been filled and locked_at is set)
+    if trade.psychology is not None and trade.locked_at is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Trade is locked and cannot be updated."
@@ -415,8 +463,47 @@ async def tag_trade(
         
     # Check if this is the first save or an edit
     is_first_save = trade.psychology is None
+
+    # 4. Save / Update Psychology Record
+    psy = db.query(Psychology).filter(Psychology.trade_id == trade_id).first()
+    if not psy:
+        psy = Psychology(
+            id=str(uuid.uuid4()),
+            trade_id=trade_id,
+            confidence_level=confidence_level,
+            psychological_tags=psych_tags,
+            plan_adherence=plan_adherence,
+            free_notes=free_notes or ""
+        )
+        db.add(psy)
+    else:
+        psy.confidence_level = confidence_level
+        psy.psychological_tags = psych_tags
+        psy.plan_adherence = plan_adherence
+        psy.free_notes = free_notes or ""
+
+    # 5. Save / Update TradeSetupTag Records
+    db.query(TradeSetupTag).filter(TradeSetupTag.trade_id == trade_id).delete()
+    for st_val in setup_ids:
+        tax = db.query(SetupTaxonomyVersion).filter(
+            or_(SetupTaxonomyVersion.id == st_val, SetupTaxonomyVersion.tag_name == st_val)
+        ).first()
+        if tax:
+            db.add(TradeSetupTag(trade_id=trade_id, taxonomy_version_id=tax.id))
+
+    # 6. Save / Update TradeExecution Record
+    exec_rec = db.query(TradeExecution).filter(TradeExecution.trade_id == trade_id).first()
+    if not exec_rec:
+        exec_rec = TradeExecution(
+            trade_id=trade_id,
+            order_type=order_type,
+            exit_reason="take_profit" if (trade.pnl and float(trade.pnl) > 0) else ("manual_close" if trade.exit_time else None)
+        )
+        db.add(exec_rec)
+    else:
+        exec_rec.order_type = order_type
     
-    # 4. Handle Screenshot Uploads
+    # 7. Handle Screenshot Uploads
     async def process_and_save_screenshot(upload_file: UploadFile, stage_name: str):
         if not upload_file:
             return
@@ -749,13 +836,12 @@ def update_trade_manual(
             net_pnl = raw_pnl - total_fee
             trade.pnl = Decimal(str(round(net_pnl, 8)))
 
-            # Realized RR calculation
-            if sl is not None and abs(entry - sl) > 0:
-                risk = abs(entry - sl)
-                if direction == "long":
-                    rr = (exit_p - entry) / risk
-                else:
-                    rr = (entry - exit_p) / risk
+            # Realized RR calculation using dynamic Binance equity 1R model (1% of Total Binance Equity)
+            equity_1r_risk = get_dynamic_1r_risk_amount(db, 1.0)
+            trade.risk_amount = Decimal(str(round(equity_1r_risk, 6)))
+
+            if equity_1r_risk > 0:
+                rr = net_pnl / equity_1r_risk
                 trade.rr_realized = Decimal(str(round(rr, 2)))
 
         db.flush()
@@ -1075,7 +1161,7 @@ def get_trade_detail(
         "status": "Closed" if trade.exit_time else "Open",
         "data_source": trade.data_source,
         "source_badge": badge_map.get(trade.data_source, "Live"),
-        "is_locked": trade.locked_at is not None,
+        "is_locked": (trade.locked_at is not None and trade.psychology is not None),
         "locked_at": trade.locked_at.isoformat() if trade.locked_at else None,
         "setups": setup_names,
         "fills": linked_fills,

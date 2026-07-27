@@ -16,6 +16,9 @@ const AnalyticsSummaryCards = ({
     high_volatility: 0,
   };
 
+  const netPnl = summary.total_net_pnl !== undefined ? Number(summary.total_net_pnl) : 0.0;
+  const totalFee = summary.total_fee !== undefined ? Number(summary.total_fee) : 0.0;
+
   return (
     <div style={styles.wrapper}>
       {/* Header Controls & Filter Bar */}
@@ -52,7 +55,7 @@ const AnalyticsSummaryCards = ({
             <option value="BTCUSDT">BTCUSDT</option>
             <option value="ETHUSDT">ETHUSDT</option>
             <option value="SOLUSDT">SOLUSDT</option>
-
+            <option value="SPKUSDT">SPKUSDT</option>
             <option value="CHILLGUYUSDT">CHILLGUYUSDT</option>
             <option value="VVVUSDT">VVVUSDT</option>
           </select>
@@ -75,7 +78,7 @@ const AnalyticsSummaryCards = ({
         </span>
       </div>
 
-      {/* Standalone Headline Metric Cards (Dokumen Teknis Bab 5.5 & Bab 13.4) */}
+      {/* Standalone Headline Metric Cards (12 Kartu Metrik Lengkap Dokumen Teknis Bab 5.5 & 13.4) */}
       <div style={styles.grid}>
         {/* Card 1: Expectancy */}
         <div style={styles.card}>
@@ -117,7 +120,25 @@ const AnalyticsSummaryCards = ({
           <span style={styles.cardSub}>Rasio Gross Profit vs Gross Loss</span>
         </div>
 
-        {/* Card 5: Max Drawdown */}
+        {/* Card 5: Total Net PnL */}
+        <div style={styles.card}>
+          <span style={styles.cardLabel}>TOTAL NET PnL ($)</span>
+          <div style={{ ...styles.cardValue, color: netPnl >= 0 ? "#0ecb81" : "#f6465d" }}>
+            {netPnl >= 0 ? `+$${netPnl.toFixed(2)}` : `-$${Math.abs(netPnl).toFixed(2)}`}
+          </div>
+          <span style={styles.cardSub}>Akumulasi keuntungan/kerugian bersih</span>
+        </div>
+
+        {/* Card 6: Total Fee */}
+        <div style={styles.card}>
+          <span style={styles.cardLabel}>TOTAL BIAYA & KOMISI ($)</span>
+          <div style={{ ...styles.cardValue, color: "#f0b90b" }}>
+            -${totalFee.toFixed(2)}
+          </div>
+          <span style={styles.cardSub}>Biaya transaksi & funding fee exchange</span>
+        </div>
+
+        {/* Card 7: Max Drawdown */}
         <div style={styles.card}>
           <span style={styles.cardLabel}>MAX DRAWDOWN (MAX DD)</span>
           <div style={{ ...styles.cardValue, color: "#f6465d" }}>
@@ -128,7 +149,7 @@ const AnalyticsSummaryCards = ({
           </span>
         </div>
 
-        {/* Card 6: Recovery Factor */}
+        {/* Card 8: Recovery Factor */}
         <div style={styles.card}>
           <span style={styles.cardLabel}>RECOVERY FACTOR</span>
           <div style={{ ...styles.cardValue, color: (summary.recovery_factor || 0) >= 1.0 ? "#0ecb81" : "#f0b90b" }}>
@@ -137,7 +158,7 @@ const AnalyticsSummaryCards = ({
           <span style={styles.cardSub}>Rasio Total Net PnL vs Max DD</span>
         </div>
 
-        {/* Card 7: Avg Holding Time */}
+        {/* Card 9: Avg Holding Time */}
         <div style={styles.card}>
           <span style={styles.cardLabel}>AVG HOLDING TIME</span>
           <div style={{ ...styles.cardValue, color: "#a78bfa" }}>
@@ -146,7 +167,7 @@ const AnalyticsSummaryCards = ({
           <span style={styles.cardSub}>Rata-rata durasi posisi terbuka</span>
         </div>
 
-        {/* Card 8: Avg Return on Margin */}
+        {/* Card 10: Avg Return on Margin */}
         <div style={styles.card}>
           <span style={styles.cardLabel}>AVG RETURN ON MARGIN</span>
           <div style={{ ...styles.cardValue, color: (summary.return_on_margin_pct || 0) >= 0 ? "#0ecb81" : "#f6465d" }}>
@@ -157,7 +178,7 @@ const AnalyticsSummaryCards = ({
           </span>
         </div>
 
-        {/* Card 9: MFE / MAE */}
+        {/* Card 11: MFE / MAE */}
         <div style={styles.card}>
           <span style={styles.cardLabel}>AVG MFE / MAE EXCURSION</span>
           <div style={{ ...styles.cardValue, color: "#a78bfa" }}>
@@ -167,9 +188,20 @@ const AnalyticsSummaryCards = ({
             Max Adverse (MAE): <b style={{ color: "#f6465d" }}>{(summary.mae_avg_r || 0)}R</b>
           </span>
         </div>
+
+        {/* Card 12: Total Populasi Trades */}
+        <div style={styles.card}>
+          <span style={styles.cardLabel}>VOLUMETRIK POPULASI ($n$)</span>
+          <div style={{ ...styles.cardValue, color: "#38bdf8" }}>
+            {summary.total_trades || 0} Trade
+          </div>
+          <span style={styles.cardSub}>
+            <b style={{ color: "#0ecb81" }}>{summary.closed_trades || 0} Selesai</b> / <b style={{ color: "#fbbf24" }}>{(summary.total_trades || 0) - (summary.closed_trades || 0)} Aktif</b>
+          </span>
+        </div>
       </div>
 
-      {/* Coverage Per Kondisi Market (Bab 13.4 Mockup Spec) */}
+      {/* Coverage Per Kondisi Market */}
       <div style={styles.coverageCard}>
         <div style={styles.coverageHeader}>
           <span style={styles.coverageTitle}>📊 COVERAGE PER KONDISI MARKET (JUMLAH TRADE)</span>
@@ -248,7 +280,7 @@ const styles = {
   },
   toggleBtnActive: {
     backgroundColor: "#2b313a",
-    color: "#f0b90b", // Binance Gold
+    color: "#f0b90b",
     borderColor: "#f0b90b",
   },
   toggleNote: {
@@ -270,7 +302,7 @@ const styles = {
     flexDirection: "column",
     gap: "6px",
     boxSizing: "border-box",
-    minWidth: "0", // Prevents text overflow in flex/grid
+    minWidth: "0",
   },
   cardLabel: {
     fontSize: "11px",
@@ -282,7 +314,7 @@ const styles = {
     textOverflow: "ellipsis",
   },
   cardValue: {
-    fontSize: "28px",
+    fontSize: "26px",
     fontWeight: "800",
     lineHeight: "1.2",
     whiteSpace: "nowrap",

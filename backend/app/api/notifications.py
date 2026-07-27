@@ -40,11 +40,7 @@ def get_in_app_notifications(
         SystemNotification.channel == "in_app",
         SystemNotification.acknowledged_at == None
     )
-    if current_user:
-        query = query.filter(
-            (SystemNotification.user_id == current_user.id) | (SystemNotification.user_id == None)
-        )
-    notifications = query.order_by(SystemNotification.created_at.desc()).limit(20).all()
+    notifications = query.order_by(SystemNotification.sent_at.desc()).limit(20).all()
 
     return {
         "notifications": [
@@ -53,8 +49,7 @@ def get_in_app_notifications(
                 "type": n.type,
                 "reference_id": n.reference_id,
                 "message": n.message,
-                "status": n.status,
-                "created_at": n.created_at.isoformat() if n.created_at else None,
+                "sent_at": n.sent_at.isoformat() if n.sent_at else None,
                 "url": f"/journal/detail/{n.reference_id}" if n.reference_id and n.type == "trade_pending_tag" else "/journal"
             }
             for n in notifications
@@ -91,8 +86,7 @@ def acknowledge_all_notifications(
     """
     db.query(SystemNotification).filter(
         SystemNotification.channel == "in_app",
-        SystemNotification.acknowledged_at == None,
-        (SystemNotification.user_id == current_user.id) | (SystemNotification.user_id == None)
+        SystemNotification.acknowledged_at == None
     ).update({"acknowledged_at": datetime.now()}, synchronize_session=False)
 
     db.commit()

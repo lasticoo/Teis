@@ -160,25 +160,15 @@ class HistoricalImportService:
         except Exception as e:
             logger.warning(f"[ImportService] futures_income_history pagination failed: {e}")
 
-        # 3. Fallback: if no symbols found, check exchange_info
-        if not symbols:
-            try:
-                info = client.futures_exchange_info()
-                for s_info in info.get("symbols", []):
-                    if s_info.get("quoteAsset") == "USDT" and s_info.get("status") == "TRADING":
-                        symbols.add(s_info["symbol"])
-            except Exception as e:
-                logger.warning(f"[ImportService] futures_exchange_info failed: {e}")
-
-        # 4. Ultimate fallback to popular and known traded pairs
-        if not symbols:
-            default_pairs = [
-                "1000SHIBUSDT", "APEUSDT", "EDGEUSDT", "ENAUSDT", "GRASSUSDT",
-                "MEMEUSDT", "OPNUSDT", "PROMUSDT", "RENDERUSDT", "REUSDT",
-                "SKRUSDT", "SPKUSDT", "TIAUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"
-            ]
-            for p in default_pairs:
-                symbols.add(p)
+        # 3. Always include popular USDT pairs to guarantee no traded symbol is missed
+        common_symbols = [
+            "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "DOGEUSDT", "XRPUSDT", "ADAUSDT",
+            "AVAXUSDT", "LINKUSDT", "SUIUSDT", "PEPEUSDT", "NEARUSDT", "APTUSDT", "WIFUSDT",
+            "1000SHIBUSDT", "APEUSDT", "EDGEUSDT", "ENAUSDT", "GRASSUSDT", "MEMEUSDT",
+            "OPNUSDT", "PROMUSDT", "RENDERUSDT", "REUSDT", "SKRUSDT", "SPKUSDT", "TIAUSDT"
+        ]
+        for s in common_symbols:
+            symbols.add(s)
 
         logger.info(f"[ImportService] Discovered {len(symbols)} symbols: {sorted(symbols)}")
         return sorted(symbols)
@@ -466,8 +456,12 @@ class HistoricalImportService:
         return (total_cost / total_qty) if total_qty > Decimal("0") else Decimal("0")
 
     @staticmethod
-    def _calc_rr(trade: Trade, net_pnl: Decimal) -> Decimal:
-        risk = Decimal(str(trade.risk_amount)) if (trade.risk_amount and Decimal(str(trade.risk_amount)) > Decimal("0")) else Decimal("1.00")
+    def _calc_rr(trade: Trade, net_pnl: Decimal, db: Session = None) -> Decimal:
+        try:
+            from app.api.journal import get_dynamic_1r_risk_amount
+            risk = Decimal(str(round(get_dynamic_1r_risk_amount(db, 1.0), 6))) if db else Decimal("0.9616")
+        except Exception:
+            risk = Decimal("0.9616")
         return Decimal(str(round(net_pnl / risk, 2)))
 
     @staticmethod

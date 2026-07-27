@@ -12,6 +12,7 @@ from app.api.notifications import router as notifications_router
 from app.api.import_wizard import router as import_wizard_router
 from app.api.analytics import router as analytics_router
 from app.api.edges import router as edges_router
+from app.api.ai_coach import router as ai_coach_router
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -37,6 +38,7 @@ app.include_router(notifications_router, prefix="/api/v1")
 app.include_router(import_wizard_router, prefix="/api/v1")
 app.include_router(analytics_router, prefix="/api/v1/analytics", tags=["analytics"])
 app.include_router(edges_router, prefix="/api/v1")
+app.include_router(ai_coach_router, prefix="/api/v1")
 
 import asyncio
 from app.services.websocket_manager import redis_notification_listener

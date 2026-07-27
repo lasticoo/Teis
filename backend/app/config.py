@@ -56,6 +56,16 @@ class Settings(BaseSettings):
     VAPID_PRIVATE_KEY: str = Field(default="")
     VAPID_ADMIN_EMAIL: str = Field(default="admin@teis.local")
 
+    # LLM & AI Coach Configuration
+    GROQ_API_KEY: str = Field(default="")
+    OPENROUTER_API_KEY: str = Field(default="")
+    DEEPSEEK_API_KEY: str = Field(default="")
+    TOGETHER_API_KEY: str = Field(default="")
+    GEMINI_API_KEY: str = Field(default="")
+    OPENAI_API_KEY: str = Field(default="")
+    OLLAMA_HOST: str = Field(default="")
+    LLM_MODEL: str = Field(default="llama-3.3-70b-versatile")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

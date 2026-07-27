@@ -12,6 +12,8 @@ from app.database import SessionLocal
 from app.models.models import Trade, ExchangeFill, TradeFill, APICredential, MarketContext
 from app.services.binance import BinanceService
 from app.services.trade_collection import TradeCollectionService
+from app.services.edge_discovery_engine import EdgeDiscoveryEngine
+from app.services.edge_status_monitor import EdgeStatusMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -36,13 +38,12 @@ celery_app.conf.update(
 
 from celery.schedules import crontab
 from app.services.equity_service import EquitySnapshotService
-from app.services.edge_discovery_engine import EdgeDiscoveryEngine
 
 # Polling beat schedule
 celery_app.conf.beat_schedule = {
-    "poll_open_positions_every_30s": {
+    "poll_open_positions_every_3s": {
         "task": "tasks.poll_open_positions",
-        "schedule": 30.0,
+        "schedule": 3.0,
     },
     "capture_equity_snapshot_hourly": {
         "task": "tasks.capture_equity_snapshot",
@@ -55,6 +56,10 @@ celery_app.conf.beat_schedule = {
     "run_edge_discovery_daily": {
         "task": "tasks.run_edge_discovery_engine",
         "schedule": crontab(minute=0, hour=2),  # Every day at 02:00 AM WIB
+    },
+    "monitor_edge_status_daily": {
+        "task": "tasks.monitor_edge_status",
+        "schedule": crontab(minute=30, hour=2),  # Every day at 02:30 AM WIB
     }
 }
 
@@ -68,6 +73,21 @@ def run_edge_discovery_engine():
         return res
     except Exception as e:
         logger.error(f"Error in run_edge_discovery_engine task: {e}")
+        return {"status": "error", "message": str(e)}
+    finally:
+        db.close()
+
+
+@celery_app.task(name="tasks.monitor_edge_status")
+def monitor_edge_status():
+    logger.info("Starting Celery task monitor_edge_status...")
+    db = SessionLocal()
+    try:
+        res = EdgeStatusMonitor.evaluate_all_edge_statuses(db)
+        logger.info(f"Finished monitor_edge_status task: {res}")
+        return res
+    except Exception as e:
+        logger.error(f"Error in monitor_edge_status task: {e}")
         return {"status": "error", "message": str(e)}
     finally:
         db.close()
@@ -112,6 +132,8 @@ def poll_open_positions():
             leverage = Decimal(str(leverage_val)) if leverage_val is not None else None
             entry_price_binance = Decimal(pos["entryPrice"])
             update_time = datetime.fromtimestamp(int(pos["updateTime"]) / 1000.0, tz=timezone.utc)
+            direction = "long" if pos_amt > 0 else "short"
+            margin = (abs(pos_amt) * entry_price_binance / leverage) if (leverage and leverage > 0) else None
 
             # Check if this position is already tracked
             if symbol in active_trades_map:

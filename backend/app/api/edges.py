@@ -6,6 +6,7 @@ from sqlalchemy import text
 from app.database import get_db
 from app.models.models import EdgeBlueprint, Trade, TradeSetupTag
 from app.services.edge_discovery_engine import EdgeDiscoveryEngine
+from app.services.edge_status_monitor import EdgeStatusMonitor
 
 router = APIRouter(prefix="/edges", tags=["Edge Discovery Engine"])
 
@@ -133,3 +134,20 @@ def trigger_edge_discovery(db: Session = Depends(get_db)):
     """
     result = EdgeDiscoveryEngine.run_discovery(db)
     return result
+
+
+@router.get("/status")
+def get_edge_status_overview(db: Session = Depends(get_db)):
+    """
+    FITUR 13 - Returns current edge status overview, maturity breakdown, and health summary.
+    """
+    return EdgeStatusMonitor.get_status_overview(db)
+
+
+@router.post("/monitor")
+def trigger_edge_status_monitor(db: Session = Depends(get_db)):
+    """
+    FITUR 13 - Triggers on-demand Edge Validation & Status Monitor process.
+    Evaluates 30-trade run-rate degradation and handles status transitions.
+    """
+    return EdgeStatusMonitor.evaluate_all_edge_statuses(db)

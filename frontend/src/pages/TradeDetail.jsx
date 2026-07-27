@@ -21,6 +21,11 @@ const TradeDetail = () => {
   const [posLoading, setPosLoading] = useState(false);
   const [showPosForm, setShowPosForm] = useState(false);
 
+  // AI Coach state (FITUR 14)
+  const [aiReview, setAiReview] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+
   const fetchTradeDetail = async () => {
     const token = localStorage.getItem("token") || localStorage.getItem("access_token");
     setLoading(true);
@@ -48,13 +53,31 @@ const TradeDetail = () => {
     }
   };
 
+  const fetchAICoachReview = async () => {
+    const token = localStorage.getItem("token") || localStorage.getItem("access_token");
+    try {
+      const res = await fetch(`http://localhost:8000/api/v1/ai-coach/review/${tradeId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.has_review && data.ai_coach_review) {
+          setAiReview(data.ai_coach_review);
+        }
+      }
+    } catch (e) {
+      console.error("Gagal mengambil review AI Coach:", e);
+    }
+  };
+
   useEffect(() => {
     if (tradeId) {
       fetchTradeDetail();
+      fetchAICoachReview();
     }
   }, [tradeId]);
 
-  // Sync form state when trade loads
+  // Sync form state & AI review when trade loads
   useEffect(() => {
     if (trade) {
       setPosForm({
@@ -72,6 +95,26 @@ const TradeDetail = () => {
       }
     }
   }, [trade]);
+
+  const handleRequestAICoach = async () => {
+    setAiLoading(true);
+    setAiError("");
+    const token = localStorage.getItem("token") || localStorage.getItem("access_token");
+    try {
+      const res = await fetch("http://localhost:8000/api/v1/ai-coach/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ trade_id: tradeId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Gagal menghasilkan evaluasi AI Coach.");
+      setAiReview(data.ai_coach_review);
+    } catch (err) {
+      setAiError("❌ " + err.message);
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   const updatePosition = async (payload) => {
     setPosErr("");
@@ -486,6 +529,64 @@ const TradeDetail = () => {
               )}
             </div>
           </div>
+        </div>
+
+        {/* Section 2.5: AI Coach Evaluation Card (Mockup 13.3) */}
+        <div style={{ ...styles.sectionCard, border: "1px solid rgba(167, 139, 250, 0.3)", backgroundColor: "#13161f" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "16px" }}>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                <span style={{ fontSize: "20px" }}>🤖</span>
+                <h3 style={{ ...styles.sectionTitle, color: "#a78bfa", margin: 0 }}>FITUR 14 — AI COACH EVALUATION</h3>
+                <span style={{ fontSize: "11px", backgroundColor: "rgba(167, 139, 250, 0.2)", color: "#a78bfa", padding: "2px 8px", borderRadius: "10px", fontWeight: "700" }}>
+                  DATA PRIVACY PROTECTED
+                </span>
+              </div>
+              <span style={styles.sectionSubtitle}>
+                Evaluasi kualitatif cerdas berbasis LLM & komparasi histori setup serupa (Saldo & API Key Terkunci)
+              </span>
+            </div>
+            <button
+              onClick={handleRequestAICoach}
+              disabled={aiLoading}
+              style={{
+                backgroundColor: aiLoading ? "#334155" : "linear-gradient(135deg, #8b5cf6, #6366f1)",
+                backgroundColor: "#7c3aed",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: "10px",
+                padding: "10px 18px",
+                fontSize: "13px",
+                fontWeight: "700",
+                cursor: aiLoading ? "not-allowed" : "pointer",
+                boxShadow: "0 4px 14px rgba(124, 58, 237, 0.4)",
+                transition: "all 0.2s ease"
+              }}
+            >
+              {aiLoading ? "⏳ Menganalisis & Resample..." : aiReview ? "🔄 Generate Ulang (Re-evaluasi AI)" : "⚡ Minta Evaluasi AI"}
+            </button>
+          </div>
+
+          {aiError && (
+            <div style={{ backgroundColor: "rgba(246, 70, 93, 0.15)", border: "1px solid #f6465d", color: "#f6465d", padding: "12px", borderRadius: "10px", fontSize: "13px", marginBottom: "16px" }}>
+              {aiError}
+            </div>
+          )}
+
+          {!aiReview ? (
+            <div style={{ backgroundColor: "#0b0e11", border: "1px dashed #2b313a", borderRadius: "12px", padding: "30px", textAlign: "center", color: "#848e9c" }}>
+              <p style={{ margin: "0 0 6px 0", fontWeight: "600", color: "#eaecef" }}>Belum Ada Ulasan AI Coach untuk Trade Ini</p>
+              <span style={{ fontSize: "12px" }}>
+                Klik tombol <b>'⚡ Minta Evaluasi AI'</b> di atas untuk menghasilkan analisis kualitatif psikologi, eksekusi, dan komparasi histori setup serupa.
+              </span>
+            </div>
+          ) : (
+            <div style={{ backgroundColor: "#0b0e11", border: "1px solid #2b313a", borderRadius: "14px", padding: "20px" }}>
+              <div style={{ whiteSpace: "pre-line", lineHeight: "1.7", color: "#e2e8f0", fontSize: "13.5px" }}>
+                {aiReview}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Section 3: Market Context Collector (Objektif) */}

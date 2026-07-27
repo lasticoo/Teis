@@ -112,6 +112,26 @@ const QuickTag = () => {
     setScreenshot(null);
     setScreenshotPreview(null);
 
+    // Check if there is an unsaved draft in localStorage for this trade
+    const savedDraft = localStorage.getItem(`teis_quicktag_draft_${trade.id}`);
+    if (savedDraft) {
+      try {
+        const draft = JSON.parse(savedDraft);
+        setSelectedSetups(draft.selectedSetups || []);
+        setBias(draft.bias || "bull_trend");
+        setSession(draft.session || detectSession(trade.entry_time));
+        setOrderType(draft.orderType || "limit");
+        setConfidence(draft.confidence || 5);
+        setPsychology(draft.psychology || []);
+        setPlanAdherence(draft.planAdherence ?? true);
+        setFreeNotes(draft.freeNotes || "");
+        setCountdown(trade.seconds_left !== null ? Math.floor(trade.seconds_left) : null);
+        return;
+      } catch (e) {
+        console.error("Failed to parse draft", e);
+      }
+    }
+
     if (trade.is_tagged && trade.psychology) {
       setSelectedSetups(trade.setups || []);
       setConfidence(trade.psychology.confidence_level);
@@ -134,8 +154,25 @@ const QuickTag = () => {
     }
   };
 
+  // Auto-save draft changes to localStorage while user is editing
+  useEffect(() => {
+    if (selectedTrade && !selectedTrade.is_tagged) {
+      const draft = {
+        selectedSetups,
+        bias,
+        session,
+        orderType,
+        confidence,
+        psychology,
+        planAdherence,
+        freeNotes
+      };
+      localStorage.setItem(`teis_quicktag_draft_${selectedTrade.id}`, JSON.stringify(draft));
+    }
+  }, [selectedTrade, selectedSetups, bias, session, orderType, confidence, psychology, planAdherence, freeNotes]);
+
   const handleSetupToggle = (id) => {
-    if (selectedTrade?.is_tagged && countdown === 0) return; // Locked
+    if (selectedTrade?.is_locked) return; // Locked
 
     const clickedItem = taxonomy.find((t) => t.id === id);
     const clickedName = clickedItem ? clickedItem.tag_name : "";
@@ -168,7 +205,7 @@ const QuickTag = () => {
   };
 
   const handlePsychologyToggle = (tag) => {
-    if (selectedTrade?.is_tagged && countdown === 0) return; // Locked
+    if (selectedTrade?.is_locked) return; // Locked
 
     if (psychology.includes(tag)) {
       setPsychology(psychology.filter((item) => item !== tag));
@@ -178,7 +215,7 @@ const QuickTag = () => {
   };
 
   const handleFileChange = (e, timeframe = "legacy") => {
-    if (selectedTrade?.is_tagged && countdown === 0) return; // Locked
+    if (selectedTrade?.is_locked) return; // Locked
 
     const file = e.target.files[0];
     if (file) {
@@ -304,9 +341,14 @@ const QuickTag = () => {
         throw new Error(data.detail || "Terjadi kesalahan saat menyimpan tag.");
       }
 
+      // Clear local draft
+      localStorage.removeItem(`teis_quicktag_draft_${selectedTrade.id}`);
+
       setSuccessMsg("Jurnal berhasil disimpan! Trade berada di window koreksi 120 detik.");
       setCountdown(120);
-      fetchPendingData();
+      
+      // Refresh list to update UI
+      await fetchPendingData();
     } catch (err) {
       setError(err.message);
     }
@@ -425,7 +467,7 @@ const QuickTag = () => {
                             <button
                               type="button"
                               key={tax.id}
-                              disabled={selectedTrade.is_tagged && countdown === 0}
+                              disabled={Boolean(selectedTrade.is_locked)}
                               onClick={() => handleSetupToggle(tax.id)}
                               style={{
                                 ...styles.pillButton,
@@ -446,7 +488,7 @@ const QuickTag = () => {
                             <button
                               type="button"
                               key={tax.id}
-                              disabled={selectedTrade.is_tagged && countdown === 0}
+                              disabled={Boolean(selectedTrade.is_locked)}
                               onClick={() => handleSetupToggle(tax.id)}
                               style={{
                                 ...styles.pillButton,
@@ -475,7 +517,7 @@ const QuickTag = () => {
                             <button
                               type="button"
                               key={tax.id}
-                              disabled={selectedTrade.is_tagged && countdown === 0}
+                              disabled={Boolean(selectedTrade.is_locked)}
                               onClick={() => handleSetupToggle(tax.id)}
                               style={{
                                 ...styles.pillButton,
@@ -496,7 +538,7 @@ const QuickTag = () => {
                             <button
                               type="button"
                               key={tax.id}
-                              disabled={selectedTrade.is_tagged && countdown === 0}
+                              disabled={Boolean(selectedTrade.is_locked)}
                               onClick={() => handleSetupToggle(tax.id)}
                               style={{
                                 ...styles.pillButton,
@@ -521,7 +563,7 @@ const QuickTag = () => {
                           <button
                             type="button"
                             key={tax.id}
-                            disabled={selectedTrade.is_tagged && countdown === 0}
+                            disabled={Boolean(selectedTrade.is_locked)}
                             onClick={() => handleSetupToggle(tax.id)}
                             style={{
                               ...styles.pillButton,
@@ -550,7 +592,7 @@ const QuickTag = () => {
                           <button
                             type="button"
                             key={tax.id}
-                            disabled={selectedTrade.is_tagged && countdown === 0}
+                            disabled={Boolean(selectedTrade.is_locked)}
                             onClick={() => handleSetupToggle(tax.id)}
                             style={{
                               ...styles.pillButton,
@@ -571,7 +613,7 @@ const QuickTag = () => {
                     <label style={styles.label}>2. Bias Arah</label>
                     <select
                       value={bias}
-                      disabled={selectedTrade.is_tagged && countdown === 0}
+                      disabled={Boolean(selectedTrade?.is_locked)}
                       onChange={(e) => setBias(e.target.value)}
                       style={styles.select}
                     >
@@ -585,7 +627,7 @@ const QuickTag = () => {
                     <label style={styles.label}>3. Sesi Trading</label>
                     <select
                       value={session}
-                      disabled={selectedTrade.is_tagged && countdown === 0}
+                      disabled={Boolean(selectedTrade?.is_locked)}
                       onChange={(e) => setSession(e.target.value)}
                       style={styles.select}
                     >
@@ -599,7 +641,7 @@ const QuickTag = () => {
                     <label style={styles.label}>4. Tipe Order</label>
                     <select
                       value={orderType}
-                      disabled={selectedTrade.is_tagged && countdown === 0}
+                      disabled={Boolean(selectedTrade?.is_locked)}
                       onChange={(e) => setOrderType(e.target.value)}
                       style={styles.select}
                     >
@@ -617,7 +659,7 @@ const QuickTag = () => {
                       min="1"
                       max="10"
                       value={confidence}
-                      disabled={selectedTrade.is_tagged && countdown === 0}
+                      disabled={Boolean(selectedTrade?.is_locked)}
                       onChange={(e) => setConfidence(parseInt(e.target.value))}
                       style={styles.slider}
                     />
@@ -632,7 +674,7 @@ const QuickTag = () => {
                       <button
                         type="button"
                         key={tag}
-                        disabled={selectedTrade.is_tagged && countdown === 0}
+                        disabled={Boolean(selectedTrade?.is_locked)}
                         onClick={() => handlePsychologyToggle(tag)}
                         style={{
                           ...styles.pillButton,
@@ -651,7 +693,7 @@ const QuickTag = () => {
                     <label style={styles.label}>7. Apakah Entry Sesuai Trading Plan?</label>
                     <button
                       type="button"
-                      disabled={selectedTrade.is_tagged && countdown === 0}
+                      disabled={Boolean(selectedTrade?.is_locked)}
                       onClick={() => setPlanAdherence(!planAdherence)}
                       style={{
                         ...styles.toggleButton,
@@ -670,7 +712,7 @@ const QuickTag = () => {
                     <input
                       type="file"
                       accept="image/*"
-                      disabled={selectedTrade.is_tagged && countdown === 0}
+                      disabled={Boolean(selectedTrade?.is_locked)}
                       onChange={(e) => handleFileChange(e, "4h")}
                       style={styles.fileInput}
                     />
@@ -690,7 +732,7 @@ const QuickTag = () => {
                     <input
                       type="file"
                       accept="image/*"
-                      disabled={selectedTrade.is_tagged && countdown === 0}
+                      disabled={Boolean(selectedTrade?.is_locked)}
                       onChange={(e) => handleFileChange(e, "1h")}
                       style={styles.fileInput}
                     />
@@ -712,7 +754,7 @@ const QuickTag = () => {
                     <label style={styles.label}>10. Catatan Bebas Pendek</label>
                     <textarea
                       value={freeNotes}
-                      disabled={selectedTrade.is_tagged && countdown === 0}
+                      disabled={Boolean(selectedTrade?.is_locked)}
                       onChange={(e) => setFreeNotes(e.target.value)}
                       placeholder="Masukkan detail tambahan tentang entry Anda..."
                       style={styles.textarea}
@@ -723,18 +765,18 @@ const QuickTag = () => {
                 {/* Submit button */}
                 <button
                   type="submit"
-                  disabled={selectedTrade.is_tagged && countdown === 0}
+                  disabled={Boolean(selectedTrade?.is_locked)}
                   style={{
                     ...styles.submitButton,
-                    ...((selectedTrade.is_tagged && countdown === 0)
+                    ...(Boolean(selectedTrade?.is_locked)
                       ? styles.submitButtonDisabled
                       : {}),
                   }}
                 >
-                  {selectedTrade.is_tagged
-                    ? countdown > 0
-                      ? "Perbarui Jurnal (Edit)"
-                      : "Jurnal Terkunci"
+                  {selectedTrade.is_locked
+                    ? "Jurnal Terkunci Permanen"
+                    : selectedTrade.is_tagged
+                    ? "Perbarui Jurnal (Edit 120s)"
                     : "Simpan & Tag Jurnal"}
                 </button>
               </form>

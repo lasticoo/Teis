@@ -10,7 +10,10 @@ import TradeDetail from "./pages/TradeDetail";
 import ImportWizard from "./pages/ImportWizard";
 import Dashboard from "./pages/Dashboard";
 import EdgeExplorer from "./pages/EdgeExplorer";
-import Navbar from "./components/Navbar";
+import EdgeDetail from "./pages/EdgeDetail";
+import WeeklyReview from "./pages/WeeklyReview";
+import TopHeader from "./components/TopHeader";
+import Sidebar from "./components/Sidebar";
 
 // Route wrapper to block unauthenticated users
 const ProtectedRoute = ({ children }) => {
@@ -18,13 +21,16 @@ const ProtectedRoute = ({ children }) => {
   return isAuthenticated ? children : <Navigate to="/login" replace />;
 };
 
-// Protected Layout that includes Navbar
+// Protected Layout with Sidebar and TopHeader
 const ProtectedLayout = ({ children }) => {
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <Navbar />
-      <div style={{ flex: 1 }}>
-        {children}
+    <div style={{ display: "flex", minHeight: "100vh", backgroundColor: "#0b0e11" }}>
+      <Sidebar />
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <TopHeader />
+        <main style={{ flex: 1, padding: "24px", overflowY: "auto" }}>
+          {children}
+        </main>
       </div>
     </div>
   );
@@ -69,6 +75,26 @@ function AppContent() {
           <ProtectedRoute>
             <ProtectedLayout>
               <EdgeExplorer />
+            </ProtectedLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/edges/detail/:edgeId"
+        element={
+          <ProtectedRoute>
+            <ProtectedLayout>
+              <EdgeDetail />
+            </ProtectedLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/review"
+        element={
+          <ProtectedRoute>
+            <ProtectedLayout>
+              <WeeklyReview />
             </ProtectedLayout>
           </ProtectedRoute>
         }

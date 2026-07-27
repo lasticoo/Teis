@@ -7,9 +7,25 @@ const EdgeExplorer = () => {
   const [statusFilter, setStatusFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [discovering, setDiscovering] = useState(false);
+  const [monitoring, setMonitoring] = useState(false);
   const [discoveryMessage, setDiscoveryMessage] = useState(null);
+  const [statusOverview, setStatusOverview] = useState(null);
 
   const token = localStorage.getItem("token") || localStorage.getItem("access_token");
+
+  const fetchStatusOverview = async () => {
+    try {
+      const res = await fetch("http://localhost:8000/api/v1/edges/status", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setStatusOverview(data.summary);
+      }
+    } catch (err) {
+      console.error("Gagal mengambil status overview Edge:", err);
+    }
+  };
 
   const fetchBlueprints = async (statusVal = "all") => {
     setLoading(true);
@@ -26,6 +42,7 @@ const EdgeExplorer = () => {
         const data = await res.json();
         setBlueprints(data);
       }
+      await fetchStatusOverview();
     } catch (err) {
       console.error("Gagal mengambil data Edge Blueprints:", err);
     } finally {
@@ -80,6 +97,32 @@ const EdgeExplorer = () => {
     }
   };
 
+  const handleRunMonitor = async () => {
+    setMonitoring(true);
+    setDiscoveryMessage(null);
+    try {
+      const res = await fetch("http://localhost:8000/api/v1/edges/monitor", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const result = await res.json();
+        setDiscoveryMessage({
+          type: "success",
+          text: `🔍 Status Monitor Selesai: Evaluasi ${result.total_blueprints_evaluated} blueprint. ${result.status_changes_count} perubahan status & alert terdeteksi!`,
+        });
+        await fetchBlueprints(statusFilter);
+      }
+    } catch (err) {
+      setDiscoveryMessage({
+        type: "error",
+        text: "❌ Gagal memicu Status Monitor Engine.",
+      });
+    } finally {
+      setMonitoring(false);
+    }
+  };
+
   useEffect(() => {
     fetchBlueprints(statusFilter);
   }, [statusFilter]);
@@ -107,21 +150,32 @@ const EdgeExplorer = () => {
         {/* Header */}
         <div style={styles.headerRow}>
           <div>
-            <div style={styles.badgePill}>
-              <span style={styles.badgeDot}></span> FITUR 12 — EDGE DISCOVERY ENGINE
-            </div>
             <h1 style={styles.title}>Edge Blueprint Explorer</h1>
             <p style={styles.subtitle}>
               Penemu kombinasi setup statistik ilmiah dengan 10.000 iterasi Bootstrap Resampling & Koreksi FDR Benjamini-Hochberg.
             </p>
           </div>
-          <button
-            onClick={handleRunDiscovery}
-            disabled={discovering}
-            style={styles.btnDiscover}
-          >
-            {discovering ? "⏳ Mengkalkulasi 10k Resample..." : "⚡ Jalankan Engine Discovery"}
-          </button>
+          <div style={{ display: "flex", gap: "10px" }}>
+            <button
+              onClick={handleRunMonitor}
+              disabled={monitoring}
+              style={{
+                ...styles.btnDiscover,
+                backgroundColor: "rgba(59, 130, 246, 0.15)",
+                border: "1px solid #3b82f6",
+                color: "#3b82f6",
+              }}
+            >
+              {monitoring ? "⏳ Memeriksa Run-Rate..." : "🔍 Check Status & Run-Rate"}
+            </button>
+            <button
+              onClick={handleRunDiscovery}
+              disabled={discovering}
+              style={styles.btnDiscover}
+            >
+              {discovering ? "⏳ Mengkalkulasi 10k Resample..." : "⚡ Jalankan Engine Discovery"}
+            </button>
+          </div>
         </div>
 
         {/* Discovery Status / Notification Banner */}

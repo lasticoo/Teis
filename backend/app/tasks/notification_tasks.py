@@ -30,24 +30,22 @@ def send_in_app_notification_task(self, notification_id: str):
             logger.error(f"In-App Notification record {notification_id} not found in DB.")
             return "not_found"
 
-        created_wib = notif.created_at
+        created_wib = notif.sent_at
         if created_wib and created_wib.tzinfo is None:
             created_wib = pytz.utc.localize(created_wib).astimezone(WIB_TZ)
 
         payload = {
             "id": notif.id,
-            "user_id": notif.user_id,
             "type": notif.type,
             "reference_id": notif.reference_id,
             "message": notif.message,
             "channel": "in_app",
-            "created_at": created_wib.strftime("%Y-%m-%d %H:%M:%S") + " WIB" if created_wib else datetime.now(WIB_TZ).strftime("%Y-%m-%d %H:%M:%S") + " WIB"
+            "sent_at": created_wib.strftime("%Y-%m-%d %H:%M:%S") + " WIB" if created_wib else datetime.now(WIB_TZ).strftime("%Y-%m-%d %H:%M:%S") + " WIB"
         }
 
         # Relay to Redis Pub/Sub so FastAPI WebSocket manager broadcasts it to browser
         publish_notification_to_redis(payload)
 
-        notif.status = "sent"
         notif.sent_at = datetime.now()
         db.commit()
         logger.info(f"In-App WebSocket notification {notification_id} dispatched successfully via Redis Pub/Sub.")
@@ -55,10 +53,6 @@ def send_in_app_notification_task(self, notification_id: str):
     except Exception as e:
         err_msg = str(e)
         logger.error(f"Error dispatching In-App WebSocket notification {notification_id}: {err_msg}")
-        if notif:
-            notif.status = "failed"
-            notif.error_log = err_msg
-            db.commit()
         return "failed"
     finally:
         db.close()
@@ -78,17 +72,11 @@ def send_web_push_notification_task(self, notification_id: str):
             return "not_found"
 
         # Query subscriptions
-        subs_query = db.query(WebPushSubscription)
-        if notif.user_id:
-            subs_query = subs_query.filter(WebPushSubscription.user_id == notif.user_id)
-        subscriptions = subs_query.all()
+        subscriptions = db.query(WebPushSubscription).all()
 
         if not subscriptions:
-            msg = f"No WebPush subscriptions found for user {notif.user_id or 'all'}."
+            msg = "No WebPush subscriptions found."
             logger.info(msg)
-            notif.status = "failed"
-            notif.error_log = msg
-            db.commit()
             return "no_subscriptions"
 
         vapid_pub, vapid_priv = get_vapid_keys()
@@ -130,28 +118,17 @@ def send_web_push_notification_task(self, notification_id: str):
         except ImportError:
             msg = "pywebpush package not installed in environment."
             logger.error(msg)
-            notif.status = "failed"
-            notif.error_log = msg
-            db.commit()
             return "import_error"
 
         if success_count > 0:
-            notif.status = "sent"
             notif.sent_at = datetime.now()
             logger.info(f"Web Push notification {notification_id} sent successfully to {success_count} device(s).")
-        else:
-            notif.status = "failed"
-            notif.error_log = "; ".join(errors) if errors else "Failed to send WebPush to devices."
 
         db.commit()
         return "sent" if success_count > 0 else "failed"
     except Exception as e:
         err_msg = str(e)
         logger.error(f"Error sending Web Push notification {notification_id}: {err_msg}")
-        if notif:
-            notif.status = "failed"
-            notif.error_log = err_msg
-            db.commit()
         return "failed"
     finally:
         db.close()
@@ -171,19 +148,12 @@ def send_email_notification_task(self, notification_id: str):
             return "not_found"
 
         recipient_email = None
-        if notif.user_id:
-            user = db.query(User).filter(User.id == notif.user_id).first()
-            if user and user.email:
-                recipient_email = user.email
-
-        if not recipient_email:
-            first_user = db.query(User).filter(User.email != None, User.email != "").first()
-            if first_user:
-                recipient_email = first_user.email
+        first_user = db.query(User).filter(User.email != None, User.email != "").first()
+        if first_user:
+            recipient_email = first_user.email
 
         if not recipient_email:
             recipient_email = settings.SMTP_FROM_EMAIL
-
 
         subject = f"[TEIS Alert] {notif.type.replace('_', ' ').title()}"
         body_text = f"Trading Edge Intelligence System Notification\n\nType: {notif.type}\nMessage: {notif.message}\nReference ID: {notif.reference_id or '—'}\nTime: {datetime.now(WIB_TZ).strftime('%Y-%m-%d %H:%M:%S')} WIB\n\nAccess TEIS Dashboard: http://localhost:5173"
@@ -255,7 +225,6 @@ def send_email_notification_task(self, notification_id: str):
                 server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
             server.send_message(msg)
 
-        notif.status = "sent"
         notif.sent_at = datetime.now()
         db.commit()
         logger.info(f"HTML Email notification {notification_id} sent successfully to {recipient_email}.")
@@ -264,16 +233,6 @@ def send_email_notification_task(self, notification_id: str):
     except Exception as e:
         err_msg = str(e)
         logger.error(f"SMTP error sending email notification {notification_id}: {err_msg}")
-        if notif:
-            notif.status = "failed"
-            notif.error_log = err_msg
-            db.commit()
-
-        # Retry with delay if temporary SMTP failure
-        try:
-            self.retry(exc=e)
-        except Exception:
-            pass
         return "failed"
     finally:
         db.close()

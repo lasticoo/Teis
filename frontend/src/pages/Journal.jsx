@@ -7,7 +7,7 @@ const Journal = () => {
   const [trades, setTrades] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [sourceFilter, setSourceFilter] = useState("all"); // 'all', 'binance_sync', 'historical_import'
+  const [sourceFilter, setSourceFilter] = useState("binance_sync"); // Default to Live Trade ('binance_sync')
   const [statusFilter, setStatusFilter] = useState("all"); // 'all', 'open', 'closed'
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -113,19 +113,19 @@ const Journal = () => {
               onClick={() => setSourceFilter("all")}
               style={sourceFilter === "all" ? styles.tabActive : styles.tab}
             >
-              Semua Sumber
+              📊 Semua Trade (+Import)
             </button>
             <button
               onClick={() => setSourceFilter("binance_sync")}
               style={sourceFilter === "binance_sync" ? styles.tabActive : styles.tab}
             >
-              🟢 Live (Binance)
+              🟢 Live/Sync Saja
             </button>
             <button
               onClick={() => setSourceFilter("historical_import")}
               style={sourceFilter === "historical_import" ? styles.tabActive : styles.tab}
             >
-              🟣 Import
+              📥 Import Saja
             </button>
           </div>
 
