@@ -81,8 +81,10 @@ class EdgeStatusMonitor:
             
             run_rate_mean_r = float(np.mean(recent_r_list)) if recent_r_list else float(bp.expectancy_r)
 
-            # 2. Determine target status based on rules
-            new_status = old_status
+            # 2. Determine target status based on rules (Dokumen Teknis Bab 08.5 & Adendum Fitur 16)
+            is_st = bp.is_stable
+            is_rep = bp.is_repeatable
+            is_rob = bp.is_robust
 
             if n_tot < 20:
                 new_status = "learning"
@@ -93,22 +95,28 @@ class EdgeStatusMonitor:
             else:
                 # n >= 50
                 if is_sig and ci_low > 0 and oos_exp > 0:
-                    new_status = "production"
+                    if (is_st is True) and (is_rep is True) and (is_rob is True):
+                        new_status = "production"
+                    else:
+                        new_status = "validation"
                 else:
                     new_status = "validation"
 
-            # 3. Check Run-Rate Performance Degradation for Production & Monitoring
+            # 3. Check Run-Rate Performance Degradation & Criteria Failures for Production & Monitoring
             if old_status == "production" or new_status == "production":
-                # Check if recent 30-trade run-rate dropped below historical ci_lower
-                if recent_trades_count >= 1 and run_rate_mean_r < ci_low:
+                # Check if recent 30-trade run-rate dropped below historical ci_lower OR any of 3 criteria failed
+                criteria_failed = (is_st is False) or (is_rep is False) or (is_rob is False)
+                if (recent_trades_count >= 1 and run_rate_mean_r < ci_low) or criteria_failed:
                     new_status = "monitoring"
+                    reason_msg = "gagal kriteria validasi kualitatif (Stabilitas/Keberulangan/Robustness)" if criteria_failed else f"run-rate ({run_rate_mean_r:.2f}R < CI {ci_low:.2f}R)"
                     logger.warning(
-                        f"🚨 Edge '{bp.name}' run-rate ({run_rate_mean_r:.2f}R) dropped below ci_lower ({ci_low:.2f}R)!"
+                        f"🚨 Edge '{bp.name}' diturunkan ke MONITORING karena {reason_msg}!"
                     )
             elif old_status == "monitoring":
-                # Check if recent 30-trade run-rate recovered above historical ci_lower
+                # Check if recent 30-trade run-rate recovered AND all 3 criteria pass
+                all_criteria_pass = (is_st is True) and (is_rep is True) and (is_rob is True)
                 if recent_trades_count >= 1 and run_rate_mean_r >= ci_low and oos_exp > 0:
-                    new_status = "production" if n_tot >= 50 else "validation"
+                    new_status = "production" if (n_tot >= 50 and all_criteria_pass) else "validation"
                     logger.info(
                         f"✅ Edge '{bp.name}' run-rate recovered ({run_rate_mean_r:.2f}R >= {ci_low:.2f}R)!"
                     )

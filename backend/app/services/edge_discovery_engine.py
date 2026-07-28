@@ -17,15 +17,311 @@ logger = logging.getLogger(__name__)
 
 class EdgeDiscoveryEngine:
     """
-    FITUR 12 - Mesin Penemu Edge (Edge Discovery Engine)
+    FITUR 12 & FITUR 16 - Mesin Penemu Edge & Uji Validasi (Edge Discovery & Validation Criteria Engine)
     
     Scientific statistical edge finder powered by vectorized NumPy Bootstrap resampling (10,000 iterations),
-    Wilson Score Interval for win rate bounds, and Benjamini-Hochberg FDR (False Discovery Rate) correction.
+    Wilson Score Interval for win rate bounds, Benjamini-Hochberg FDR (False Discovery Rate) correction,
+    and 3 qualitative validation criteria (Stability, Repeatability, Robustness).
     """
 
     BOOTSTRAP_ITERATIONS = 10000
     FDR_ALPHA = 0.05  # Target 5% FDR
     MIN_SAMPLE_SIZE = 20
+    STABILITY_MAX_CV = 0.75
+    REPEATABILITY_MIN_SUBGROUP_N = 5
+    ROBUSTNESS_MAX_DROP_PCT = 0.50
+
+    @classmethod
+    def _evaluate_stability(cls, trades_sorted: List[Dict[str, Any]]) -> Tuple[Optional[bool], Optional[Dict[str, Any]]]:
+        """
+        Sub-Test A: Uji Stabilitas
+        Splits chronologically sorted trades into 3 equal periods.
+        Checks if mean expectancy > 0 in all 3 periods and Coefficient of Variation (std / |mean|) <= STABILITY_MAX_CV.
+        """
+        N = len(trades_sorted)
+        if N < 3:
+            return None, None
+
+        n_p = N // 3
+        p1 = trades_sorted[:n_p]
+        p2 = trades_sorted[n_p:2*n_p]
+        p3 = trades_sorted[2*n_p:]
+
+        periods_detail = []
+        period_means = []
+
+        for idx, p in enumerate([p1, p2, p3], start=1):
+            if not p:
+                continue
+            r_list = [t["r_realized"] for t in p]
+            exp_r = float(np.mean(r_list))
+            period_means.append(exp_r)
+            s_date = p[0]["entry_time"].strftime("%Y-%m-%d") if p[0].get("entry_time") else "N/A"
+            e_date = p[-1]["entry_time"].strftime("%Y-%m-%d") if p[-1].get("entry_time") else "N/A"
+            periods_detail.append({
+                "period": idx,
+                "range": f"{s_date} to {e_date}",
+                "n": len(p),
+                "expectancy_r": round(exp_r, 4)
+            })
+
+        if len(period_means) < 3:
+            return None, None
+
+        overall_mean = float(np.mean(period_means))
+        overall_std = float(np.std(period_means, ddof=0))
+        abs_mean = abs(overall_mean)
+        cv = round(overall_std / abs_mean, 4) if abs_mean > 0 else 999.0
+
+        all_positive = all(m > 0 for m in period_means)
+        is_stable = all_positive and (cv <= cls.STABILITY_MAX_CV)
+
+        stability_detail = {
+            "periods": periods_detail,
+            "overall_mean_expectancy_r": round(overall_mean, 4),
+            "std_deviation": round(overall_std, 4),
+            "coefficient_of_variation": cv,
+            "threshold": cls.STABILITY_MAX_CV,
+            "all_periods_positive": all_positive,
+            "passed": is_stable
+        }
+
+        return is_stable, stability_detail
+
+    @classmethod
+    def _evaluate_repeatability(
+        cls,
+        trades_sorted: List[Dict[str, Any]],
+        db: Session
+    ) -> Tuple[Optional[bool], Optional[Dict[str, Any]]]:
+        """
+        Sub-Test B: Uji Keberulangan (Repeatable)
+        Groups trades across 3 separate dimensions: pair, month (YYYY-MM), and session.
+        Checks if majority (>50%) of valid subgroups (n >= REPEATABILITY_MIN_SUBGROUP_N) have positive expectancy R.
+        """
+        if not trades_sorted:
+            return None, None
+
+        trade_ids = [t["id"] for t in trades_sorted]
+        if not trade_ids:
+            return None, None
+
+        placeholders = ", ".join([f"'{tid}'" for tid in trade_ids])
+        sql = f"""
+            SELECT t.id, t.pair, t.entry_time, mc.session
+            FROM trades t
+            LEFT JOIN market_context mc ON t.id = mc.trade_id
+            WHERE t.id IN ({placeholders})
+        """
+        rows = db.execute(text(sql)).fetchall()
+        meta_map = {r.id: {"pair": r.pair, "entry_time": r.entry_time, "session": r.session} for r in rows}
+
+        trade_records = []
+        for t in trades_sorted:
+            m = meta_map.get(t["id"], {})
+            e_time = m.get("entry_time") or t.get("entry_time")
+            month_str = e_time.strftime("%Y-%m") if e_time else "N/A"
+            trade_records.append({
+                "id": t["id"],
+                "r_realized": t["r_realized"],
+                "pair": m.get("pair") or "N/A",
+                "month": month_str,
+                "session": m.get("session") or "N/A"
+            })
+
+        dimensions_res = {}
+        evaluable_dims_passed = []
+
+        for dim_key in ["pair", "month", "session"]:
+            from collections import defaultdict
+            grp = defaultdict(list)
+            for tr in trade_records:
+                grp[tr[dim_key]].append(tr["r_realized"])
+
+            subgroups_info = []
+            valid_subgroups_count = 0
+            positive_subgroups_count = 0
+
+            for group_val, r_vals in grp.items():
+                if group_val == "N/A":
+                    continue
+                n_grp = len(r_vals)
+                exp_grp = float(np.mean(r_vals)) if r_vals else 0.0
+                is_val = n_grp >= cls.REPEATABILITY_MIN_SUBGROUP_N
+                is_pos = exp_grp > 0
+
+                if is_val:
+                    valid_subgroups_count += 1
+                    if is_pos:
+                        positive_subgroups_count += 1
+
+                subgroups_info.append({
+                    "name": str(group_val),
+                    "n": n_grp,
+                    "expectancy_r": round(exp_grp, 4),
+                    "is_valid_sample": is_val,
+                    "is_positive": is_pos
+                })
+
+            if valid_subgroups_count >= 2:
+                dim_passed = (positive_subgroups_count / valid_subgroups_count) > 0.50
+                evaluable_dims_passed.append(dim_passed)
+                status_desc = "passed" if dim_passed else "failed"
+            else:
+                dim_passed = True
+                status_desc = "skipped_insufficient_coverage"
+
+            dimensions_res[dim_key] = {
+                "total_subgroups": len(grp),
+                "valid_subgroups": valid_subgroups_count,
+                "positive_subgroups": positive_subgroups_count,
+                "passed": dim_passed,
+                "status": status_desc,
+                "subgroups": subgroups_info
+            }
+
+        is_repeatable = all(evaluable_dims_passed) if evaluable_dims_passed else True
+
+        repeatability_detail = {
+            "dimensions": dimensions_res,
+            "evaluable_dimensions_count": len(evaluable_dims_passed),
+            "passed": is_repeatable
+        }
+
+        return is_repeatable, repeatability_detail
+
+    @classmethod
+    def _evaluate_robustness(
+        cls,
+        trades_sorted: List[Dict[str, Any]],
+        db: Session
+    ) -> Tuple[Optional[bool], Optional[Dict[str, Any]]]:
+        """
+        Sub-Test C: Uji Robustness (Simple Mode)
+        Simulates 8 TP/SL shift scenarios (+/- 5% and +/- 10%).
+        Checks if expectancy R remains > 0 in all 8 scenarios and maximum expectancy drop <= ROBUSTNESS_MAX_DROP_PCT.
+        """
+        if not trades_sorted:
+            return None, None
+
+        trade_ids = [t["id"] for t in trades_sorted]
+        if not trade_ids:
+            return None, None
+
+        placeholders = ", ".join([f"'{tid}'" for tid in trade_ids])
+        sql = f"""
+            SELECT t.id, t.entry_price, t.stop_loss, t.take_profit, t.margin, t.direction, tex.exit_reason
+            FROM trades t
+            LEFT JOIN trade_execution tex ON t.id = tex.trade_id
+            WHERE t.id IN ({placeholders})
+        """
+        rows = db.execute(text(sql)).fetchall()
+        exec_map = {
+            r.id: {
+                "entry_price": float(r.entry_price) if r.entry_price is not None else None,
+                "stop_loss": float(r.stop_loss) if r.stop_loss is not None else None,
+                "take_profit": float(r.take_profit) if r.take_profit is not None else None,
+                "exit_reason": r.exit_reason,
+                "direction": r.direction
+            }
+            for r in rows
+        }
+
+        shift_scenarios = [
+            ("TP -5%", "TP", -0.05),
+            ("TP +5%", "TP", 0.05),
+            ("SL -5%", "SL", -0.05),
+            ("SL +5%", "SL", 0.05),
+            ("TP -10%", "TP", -0.10),
+            ("TP +10%", "TP", 0.10),
+            ("SL -10%", "SL", -0.10),
+            ("SL +10%", "SL", 0.10),
+        ]
+
+        orig_r_list = [t["r_realized"] for t in trades_sorted]
+        orig_expectancy = float(np.mean(orig_r_list)) if orig_r_list else 0.0
+
+        excluded_count = 0
+        manual_or_be_count = 0
+        scenarios_results = []
+        all_scenarios_positive = True
+        max_drop_pct = 0.0
+
+        for sc_name, target_param, pct in shift_scenarios:
+            shifted_r_list = []
+            for t in trades_sorted:
+                m = exec_map.get(t["id"], {})
+                r_orig = t["r_realized"]
+                exit_reason = m.get("exit_reason")
+                entry_p = m.get("entry_price")
+                sl_p = m.get("stop_loss")
+                tp_p = m.get("take_profit")
+
+                if exit_reason in ("manual_close", "breakeven"):
+                    shifted_r_list.append(r_orig)
+                    if sc_name == "TP -5%":
+                        manual_or_be_count += 1
+                    continue
+
+                if not entry_p or not sl_p or abs(entry_p - sl_p) == 0:
+                    shifted_r_list.append(r_orig)
+                    if sc_name == "TP -5%":
+                        excluded_count += 1
+                    continue
+
+                risk_dist = abs(entry_p - sl_p)
+
+                if exit_reason == "take_profit":
+                    if target_param == "TP" and tp_p:
+                        orig_tp_dist = abs(tp_p - entry_p)
+                        new_tp_dist = orig_tp_dist * (1.0 + pct)
+                        r_shifted = new_tp_dist / risk_dist
+                    else:
+                        r_shifted = r_orig
+                elif exit_reason == "stop_loss":
+                    if target_param == "SL":
+                        new_sl_dist = risk_dist * (1.0 + pct)
+                        r_shifted = -(new_sl_dist / risk_dist)
+                    else:
+                        r_shifted = r_orig
+                else:
+                    r_shifted = r_orig
+
+                shifted_r_list.append(r_shifted)
+
+            exp_shifted = float(np.mean(shifted_r_list)) if shifted_r_list else 0.0
+            if exp_shifted <= 0:
+                all_scenarios_positive = False
+
+            if orig_expectancy > 0:
+                drop_pct = (orig_expectancy - exp_shifted) / orig_expectancy
+            else:
+                drop_pct = 0.0
+
+            if drop_pct > max_drop_pct:
+                max_drop_pct = drop_pct
+
+            scenarios_results.append({
+                "scenario": sc_name,
+                "expectancy_r": round(exp_shifted, 4),
+                "drop_pct": round(max(0.0, drop_pct), 4),
+                "positive": exp_shifted > 0
+            })
+
+        is_robust = all_scenarios_positive and (max_drop_pct <= cls.ROBUSTNESS_MAX_DROP_PCT)
+        low_confidence = (manual_or_be_count / len(trades_sorted)) > 0.70 if trades_sorted else False
+
+        robustness_detail = {
+            "original_expectancy_r": round(orig_expectancy, 4),
+            "excluded_count": excluded_count,
+            "low_confidence": low_confidence,
+            "scenarios": scenarios_results,
+            "max_drop_pct": round(max_drop_pct, 4),
+            "threshold": cls.ROBUSTNESS_MAX_DROP_PCT,
+            "passed": is_robust
+        }
+
+        return is_robust, robustness_detail
 
     @classmethod
     def run_discovery(cls, db: Session) -> Dict[str, Any]:
@@ -165,6 +461,20 @@ class EdgeDiscoveryEngine:
             wins_count = int(np.sum(r_disc > 0))
             win_rate_pct, wr_ci_low, wr_ci_high = cls._compute_wilson_score(wins_count, n_disc)
 
+            # Evaluate Fitur 16 Criteria: Stability, Repeatability, Robustness
+            is_stable, stability_detail = None, None
+            is_repeatable, repeatability_detail = None, None
+            is_robust, robustness_detail = None, None
+
+            if n_total >= 30:
+                try:
+                    is_stable, stability_detail = cls._evaluate_stability(combo_trades_sorted)
+                    is_repeatable, repeatability_detail = cls._evaluate_repeatability(combo_trades_sorted, db)
+                    is_robust, robustness_detail = cls._evaluate_robustness(combo_trades_sorted, db)
+                except Exception as eval_err:
+                    logger.error(f"❌ Error evaluating validation criteria for combination {combo}: {eval_err}", exc_info=True)
+                    is_stable, is_repeatable, is_robust = None, None, None
+
             evaluation_results.append({
                 "combo": combo,
                 "name": " + ".join(combo),
@@ -179,6 +489,13 @@ class EdgeDiscoveryEngine:
                 "win_rate_ci_lower": wr_ci_low,
                 "win_rate_ci_upper": wr_ci_high,
                 "out_of_sample_expectancy_r": out_of_sample_expectancy_r,
+                "is_stable": is_stable,
+                "stability_detail": stability_detail,
+                "is_repeatable": is_repeatable,
+                "repeatability_detail": repeatability_detail,
+                "is_robust": is_robust,
+                "robustness_detail": robustness_detail,
+                "combo_trades_sorted": combo_trades_sorted
             })
 
         # 5. Benjamini-Hochberg FDR (False Discovery Rate) Correction
@@ -202,20 +519,29 @@ class EdgeDiscoveryEngine:
 
         # 6. Status Assignment & Storage into `edge_blueprints` MySQL table
         stored_count = 0
+        eval_now = datetime.now()
+
         for res in evaluation_results:
             n_tot = res["sample_size"]
             is_sig = res["is_fdr_significant"]
             ci_low = res["ci_lower"]
             oos_exp = res["out_of_sample_expectancy_r"]
+            is_st = res["is_stable"]
+            is_rep = res["is_repeatable"]
+            is_rob = res["is_robust"]
 
-            # Status Rules (Dokumen Teknis Bab 08.5)
+            # Status Rules (Dokumen Teknis Bab 08.5 & Adendum Fitur 16)
             if n_tot < 20:
                 status = "learning"
             elif 20 <= n_tot < 30:
                 status = "research"
             else:
+                # n_tot >= 30
                 if is_sig and ci_low > 0 and oos_exp > 0:
-                    status = "production" if n_tot >= 50 else "validation"
+                    if n_tot >= 50 and (is_st is True) and (is_rep is True) and (is_rob is True):
+                        status = "production"
+                    else:
+                        status = "validation"
                 elif oos_exp < 0 or ci_low < 0:
                     status = "monitoring"
                 else:
@@ -243,6 +569,13 @@ class EdgeDiscoveryEngine:
                 existing.fdr_adjusted_p_value = round(Decimal(str(res["fdr_adjusted_p_value"])), 6)
                 existing.is_fdr_significant = is_sig
                 existing.out_of_sample_expectancy_r = round(Decimal(str(oos_exp)), 4)
+                existing.is_stable = is_st
+                existing.is_repeatable = is_rep
+                existing.is_robust = is_rob
+                existing.stability_detail = res["stability_detail"]
+                existing.repeatability_detail = res["repeatability_detail"]
+                existing.robustness_detail = res["robustness_detail"]
+                existing.criteria_evaluated_at = eval_now
                 existing.status = status
 
                 # Notify if status degraded to monitoring
@@ -269,6 +602,13 @@ class EdgeDiscoveryEngine:
                     fdr_adjusted_p_value=round(Decimal(str(res["fdr_adjusted_p_value"])), 6),
                     is_fdr_significant=is_sig,
                     out_of_sample_expectancy_r=round(Decimal(str(oos_exp)), 4),
+                    is_stable=is_st,
+                    is_repeatable=is_rep,
+                    is_robust=is_rob,
+                    stability_detail=res["stability_detail"],
+                    repeatability_detail=res["repeatability_detail"],
+                    robustness_detail=res["robustness_detail"],
+                    criteria_evaluated_at=eval_now,
                     status=status
                 )
                 db.add(blueprint)
@@ -290,7 +630,10 @@ class EdgeDiscoveryEngine:
                     "expectancy_r": r["expectancy_r"],
                     "ci": f"[{r['ci_lower']:.2f}R, {r['ci_upper']:.2f}R]",
                     "win_rate_pct": r["win_rate_pct"],
-                    "is_fdr_significant": r["is_fdr_significant"]
+                    "is_fdr_significant": r["is_fdr_significant"],
+                    "is_stable": r["is_stable"],
+                    "is_repeatable": r["is_repeatable"],
+                    "is_robust": r["is_robust"]
                 }
                 for r in evaluation_results[:5]
             ]

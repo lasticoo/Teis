@@ -161,48 +161,141 @@ const EdgeDetail = () => {
           </div>
         </div>
 
-        {/* Section 2: 3-Criterion Validation Checklist Card (Bab 05.7) */}
+        {/* Section 2: 3-Criterion Validation Checklist Card (Bab 05.7 & Adendum Fitur 16) */}
         <div style={styles.sectionCard}>
           <div style={styles.sectionHeader}>
-            <h3 style={styles.sectionTitle}>📋 Kriteria Validasi Statistik Edge (Bab 05.7)</h3>
+            <h3 style={styles.sectionTitle}>📋 Kriteria Validasi Statistik Edge (Bab 05.7 & Fitur 16)</h3>
             <span style={styles.sectionSubtitle}>Pengujian 3 pilar kematangan edge sebelum dipromosikan ke Production</span>
           </div>
 
           <div style={styles.checklistGrid}>
+            {/* 1. Stabilitas */}
             <div style={styles.checkCard}>
               <div style={styles.checkHeader}>
-                <span style={expVal > 0 ? styles.badgeCheckYes : styles.badgeCheckNo}>
-                  {expVal > 0 ? "✅ TERPENUHI" : "❌ BELUM TERPENUHI"}
+                <span style={edge.is_stable === true ? styles.badgeCheckYes : (edge.is_stable === false ? styles.badgeCheckNo : styles.badgeCheckWarn)}>
+                  {edge.is_stable === true ? "✅ TERPENUHI" : (edge.is_stable === false ? "❌ TIDAK STABIL" : "⚠️ BELUM DIUJI (n < 30)")}
                 </span>
                 <h4 style={styles.checkTitle}>1. Stabilitas (Period Consistency)</h4>
               </div>
               <p style={styles.checkDesc}>
-                Expectancy konsisten bernilai positif antar periode waktu independen (bulanan/kuartalan) tanpa outlier ekstrim.
+                Expectancy konsisten bernilai positif (+R) antar 3 periode kronologis independen dengan $CV \le 0.75$.
               </p>
+
+              {edge.stability_detail && (
+                <div style={styles.detailBox}>
+                  <div style={styles.detailHeader}>
+                    <span>📊 Evaluation Breakdown (3 Periode)</span>
+                    <span style={{ color: "#a78bfa" }}>CV = {edge.stability_detail.coefficient_of_variation ?? "N/A"}</span>
+                  </div>
+                  <table style={styles.miniTable}>
+                    <thead>
+                      <tr>
+                        <th>Periode</th>
+                        <th>Range Tanggal</th>
+                        <th>Sample (n)</th>
+                        <th>Expectancy R</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {edge.stability_detail.periods?.map((p, i) => (
+                        <tr key={i}>
+                          <td>Periode #{p.period}</td>
+                          <td>{p.range}</td>
+                          <td>{p.n}</td>
+                          <td style={{ color: p.expectancy_r > 0 ? "#22c55e" : "#ef4444", fontWeight: "700" }}>
+                            {p.expectancy_r > 0 ? `+${p.expectancy_r}` : p.expectancy_r} R
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
 
+            {/* 2. Keberulangan */}
             <div style={styles.checkCard}>
               <div style={styles.checkHeader}>
-                <span style={edge.sample_size >= 30 ? styles.badgeCheckYes : styles.badgeCheckWarn}>
-                  {edge.sample_size >= 30 ? "✅ TERPENUHI" : "⚠️ MEMBUTUHKAN SAMPLE (n ≥ 30)"}
+                <span style={edge.is_repeatable === true ? styles.badgeCheckYes : (edge.is_repeatable === false ? styles.badgeCheckNo : styles.badgeCheckWarn)}>
+                  {edge.is_repeatable === true ? "✅ TERPENUHI" : (edge.is_repeatable === false ? "❌ TIDAK REPEATABLE" : "⚠️ BELUM DIUJI (n < 30)")}
                 </span>
                 <h4 style={styles.checkTitle}>2. Repeatabilitas (Cross-Asset/Session)</h4>
               </div>
               <p style={styles.checkDesc}>
-                Edge berulang secara konsisten di lintas pair crypto dan sesi pasar utama (Asia, London, New York).
+                Edge berulang secara konsisten di mayoritas subgrup ($n \ge 5$) lintas pair, bulan kalender, dan sesi pasar.
               </p>
+
+              {edge.repeatability_detail?.dimensions && (
+                <div style={styles.detailBox}>
+                  <div style={styles.detailHeader}>
+                    <span>🌐 Evaluation Breakdown (Pair, Month, Session)</span>
+                  </div>
+                  {Object.entries(edge.repeatability_detail.dimensions).map(([dimName, dimData]) => (
+                    <div key={dimName} style={{ marginBottom: "10px" }}>
+                      <div style={{ fontSize: "11px", fontWeight: "700", color: "#38bdf8", marginBottom: "4px" }}>
+                        • Dimensi {dimName.toUpperCase()}: {dimData.passed ? "✅ Pass" : "❌ Fail"} ({dimData.positive_subgroups}/{dimData.valid_subgroups} subgrup positif)
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                        {dimData.subgroups?.map((sub, i) => (
+                          <span key={i} style={{ fontSize: "10px", padding: "2px 6px", borderRadius: "4px", backgroundColor: sub.expectancy_r > 0 ? "rgba(34, 197, 94, 0.15)" : "rgba(239, 68, 68, 0.15)", border: `1px solid ${sub.expectancy_r > 0 ? "#22c55e" : "#ef4444"}` }}>
+                            {sub.name} (n={sub.n}): {sub.expectancy_r > 0 ? `+${sub.expectancy_r}` : sub.expectancy_r}R
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
+            {/* 3. Robustness */}
             <div style={styles.checkCard}>
               <div style={styles.checkHeader}>
-                <span style={ciLow > 0 ? styles.badgeCheckYes : styles.badgeCheckWarn}>
-                  {ciLow > 0 ? "✅ TERPENUHI (CI > 0)" : "⚠️ CI LOWER MASIH NEGATIF"}
-                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span style={edge.is_robust === true ? styles.badgeCheckYes : (edge.is_robust === false ? styles.badgeCheckNo : styles.badgeCheckWarn)}>
+                    {edge.is_robust === true ? "✅ TERPENUHI" : (edge.is_robust === false ? "❌ ROBUSTNESS GAGAL" : "⚠️ BELUM DIUJI (n < 30)")}
+                  </span>
+                  <span style={styles.badgeEstimate} title="Estimasi berbasis exit_reason, bukan replay harga historis penuh">
+                    🏷️ Estimasi
+                  </span>
+                </div>
                 <h4 style={styles.checkTitle}>3. Robustness (Parameter Tolerance)</h4>
               </div>
               <p style={styles.checkDesc}>
-                Edge tetap menghasilkan profit pada variasi kecil parameter entry/stop loss tanpa mengalami over-fitting.
+                Edge tetap menghasilkan profit (+R) pada 8 skenario pergeseran parameter TP/SL ($\pm 5\%$ dan $\pm 10\%$).
               </p>
+
+              {edge.robustness_detail?.scenarios && (
+                <div style={styles.detailBox}>
+                  <div style={styles.detailHeader}>
+                    <span>🛡️ Simulation Breakdown (8 Skenario Shift TP/SL)</span>
+                    <span style={{ color: "#a78bfa" }}>Max Drop = {(edge.robustness_detail.max_drop_pct * 100).toFixed(1)}%</span>
+                  </div>
+                  <table style={styles.miniTable}>
+                    <thead>
+                      <tr>
+                        <th>Skenario</th>
+                        <th>Expectancy Shifted R</th>
+                        <th>Penurunan (Drop %)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {edge.robustness_detail.scenarios.map((sc, i) => (
+                        <tr key={i}>
+                          <td>{sc.scenario}</td>
+                          <td style={{ color: sc.expectancy_r > 0 ? "#22c55e" : "#ef4444", fontWeight: "700" }}>
+                            {sc.expectancy_r > 0 ? `+${sc.expectancy_r}` : sc.expectancy_r} R
+                          </td>
+                          <td>{(sc.drop_pct * 100).toFixed(1)}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div style={{ fontSize: "10px", color: "#94a3b8", marginTop: "6px", fontStyle: "italic" }}>
+                    * Catatan: Simulasi Simple Mode menggeser target berdasarkan exit_reason. Excluded: {edge.robustness_detail.excluded_count} trade.
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -211,11 +304,40 @@ const EdgeDetail = () => {
         <div style={styles.sectionCard}>
           <div style={styles.sectionHeader}>
             <h3 style={styles.sectionTitle}>📖 Daftar Trade Berkontribusi</h3>
-            <span style={styles.sectionSubtitle}>Daftar transaksi historis bertag setup ini</span>
+            <span style={styles.sectionSubtitle}>Daftar transaksi historis bertag setup ini ({edge.contributing_trades?.length || 0} trade)</span>
           </div>
-          <div style={styles.emptyBox}>
-            Daftar transaksi pendukung terkoneksi langsung dengan dataset jurnal utama.
-          </div>
+          {edge.contributing_trades && edge.contributing_trades.length > 0 ? (
+            <div style={{ overflowX: "auto" }}>
+              <table style={styles.miniTable}>
+                <thead>
+                  <tr>
+                    <th>Pair</th>
+                    <th>Arah</th>
+                    <th>Waktu Entry</th>
+                    <th>Net PnL</th>
+                    <th>Realized RR</th>
+                    <th>Sumber Data</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {edge.contributing_trades.map((t, i) => (
+                    <tr key={i}>
+                      <td style={{ fontWeight: "700" }}>{t.pair}</td>
+                      <td style={{ color: t.direction?.toUpperCase() === "LONG" ? "#22c55e" : "#ef4444" }}>{t.direction?.toUpperCase()}</td>
+                      <td>{t.entry_time ? t.entry_time.split("T")[0] : "N/A"}</td>
+                      <td style={{ color: t.pnl > 0 ? "#22c55e" : "#ef4444" }}>{t.pnl > 0 ? `+$${t.pnl.toFixed(2)}` : `$${t.pnl.toFixed(2)}`}</td>
+                      <td style={{ color: t.rr_realized > 0 ? "#22c55e" : "#ef4444", fontWeight: "700" }}>{t.rr_realized > 0 ? `+${t.rr_realized.toFixed(2)}R` : `${t.rr_realized.toFixed(2)}R`}</td>
+                      <td><span style={{ fontSize: "10px", padding: "2px 6px", borderRadius: "4px", backgroundColor: "rgba(148,163,184,0.15)" }}>{t.data_source}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div style={styles.emptyBox}>
+              Daftar transaksi pendukung terkoneksi langsung dengan dataset jurnal utama.
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -446,6 +568,38 @@ const styles = {
     padding: "2px 8px",
     borderRadius: "6px",
     width: "fit-content"
+  },
+  badgeEstimate: {
+    fontSize: "10px",
+    fontWeight: "700",
+    backgroundColor: "rgba(167, 139, 250, 0.15)",
+    color: "#c4b5fd",
+    border: "1px solid rgba(167, 139, 250, 0.3)",
+    padding: "2px 6px",
+    borderRadius: "6px",
+    cursor: "help"
+  },
+  detailBox: {
+    marginTop: "12px",
+    padding: "10px",
+    backgroundColor: "#13161f",
+    border: "1px solid #1e2329",
+    borderRadius: "8px"
+  },
+  detailHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    fontSize: "11px",
+    fontWeight: "700",
+    color: "#94a3b8",
+    marginBottom: "8px"
+  },
+  miniTable: {
+    width: "100%",
+    borderCollapse: "collapse",
+    fontSize: "11px",
+    color: "#e2e8f0",
+    textAlign: "left"
   },
   emptyBox: {
     backgroundColor: "#0b0e11",

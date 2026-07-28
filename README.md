@@ -13,7 +13,7 @@ TEIS dibangun dengan arsitektur monorepo modular-monolith:
 - **Analitik & Statistik**: pandas, NumPy, SciPy, statsmodels.
 - **Database**: MySQL 8.0 (konfigurasi character set `utf8mb4`).
 - **Object Storage**: MinIO (S3-compatible) untuk screenshot chart trade secara lokal.
-- **Frontend**: React + Vite (Quick-Tag Capture PWA dengan IndexedDB offline-first).
+- **Frontend**: React + Vite (Web App responsif, tanpa offline-first — didesain dengan asumsi selalu terhubung ke server backend).
 - **Infrastruktur**: Docker Compose untuk deployment lokal terpadu.
 
 ---
