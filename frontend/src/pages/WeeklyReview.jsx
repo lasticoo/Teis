@@ -85,6 +85,37 @@ const WeeklyReview = () => {
   const totalR = tradesToDisplay => tradesToDisplay.reduce((acc, t) => acc + (t.rr_realized || 0), 0);
   const totalRVal = totalR(tradesForSelectedWeek);
 
+  const [aiWeeklyLoading, setAiWeeklyLoading] = useState(false);
+  const [aiWeeklyReview, setAiWeeklyReview] = useState(null);
+
+  const fetchAiWeeklyReview = async () => {
+    setAiWeeklyLoading(true);
+    try {
+      const formattedStart = monday.toISOString().split("T")[0];
+      const formattedEnd = sunday.toISOString().split("T")[0];
+      const res = await fetch("http://localhost:8000/api/v1/ai-coach/weekly-review", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          start_date: formattedStart,
+          end_date: formattedEnd,
+          data_source: dataSource
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAiWeeklyReview(data.review_markdown);
+      }
+    } catch (err) {
+      console.error("Gagal mendapatkan evaluasi AI Coach Mingguan:", err);
+    } finally {
+      setAiWeeklyLoading(false);
+    }
+  };
+
   return (
     <div style={styles.container}>
       <div style={styles.content}>
@@ -132,7 +163,10 @@ const WeeklyReview = () => {
         {/* Week Selector Bar */}
         <div style={styles.weekNavBar}>
           <button
-            onClick={() => setSelectedWeekIndex(selectedWeekIndex + 1)}
+            onClick={() => {
+              setSelectedWeekIndex(selectedWeekIndex + 1);
+              setAiWeeklyReview(null);
+            }}
             style={styles.weekNavBtn}
           >
             ← Minggu Sebelumnya
@@ -141,7 +175,10 @@ const WeeklyReview = () => {
             <span style={{ fontSize: "14px", fontWeight: "800", color: "#a78bfa" }}>📅 {weekLabel}</span>
           </div>
           <button
-            onClick={() => setSelectedWeekIndex(Math.max(0, selectedWeekIndex - 1))}
+            onClick={() => {
+              setSelectedWeekIndex(Math.max(0, selectedWeekIndex - 1));
+              setAiWeeklyReview(null);
+            }}
             disabled={selectedWeekIndex === 0}
             style={{
               ...styles.weekNavBtn,
@@ -177,6 +214,71 @@ const WeeklyReview = () => {
               {totalPnl >= 0 ? `+$${totalPnl.toFixed(2)}` : `-$${Math.abs(totalPnl).toFixed(2)}`}
             </span>
           </div>
+        </div>
+
+        {/* Section 0: AI Coach Weekly Evaluation Card */}
+        <div style={{
+          backgroundColor: "#13192b",
+          border: "1px solid rgba(139, 92, 246, 0.4)",
+          borderRadius: "16px",
+          padding: "24px",
+          boxShadow: "0 8px 32px rgba(139, 92, 246, 0.15)"
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", marginBottom: "16px" }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "800", background: "linear-gradient(90deg, #a78bfa, #818cf8)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+                🤖 AI Coach Evaluation & Strategic Mindset Mingguan
+              </h3>
+              <span style={{ fontSize: "13px", color: "#94a3b8" }}>
+                Analisis AI terhadap performa R-Multiple, kedisiplinan emosional, dan 3 instruksi fokus minggu depan
+              </span>
+            </div>
+            <button
+              onClick={fetchAiWeeklyReview}
+              disabled={aiWeeklyLoading}
+              style={{
+                backgroundColor: aiWeeklyLoading ? "#4c1d95" : "#7c3aed",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: "10px",
+                padding: "10px 20px",
+                fontWeight: "700",
+                fontSize: "13px",
+                cursor: aiWeeklyLoading ? "not-allowed" : "pointer",
+                boxShadow: "0 4px 15px rgba(124, 58, 237, 0.4)",
+                transition: "all 0.2s ease"
+              }}
+            >
+              {aiWeeklyLoading ? "⏳ Menganalisis Mingguan..." : "⚡ Hasilkan Evaluasi AI Coach Minggu Ini"}
+            </button>
+          </div>
+
+          {aiWeeklyReview ? (
+            <div style={{
+              backgroundColor: "rgba(15, 23, 42, 0.8)",
+              border: "1px solid rgba(148, 163, 184, 0.2)",
+              borderRadius: "12px",
+              padding: "20px",
+              fontSize: "14px",
+              lineHeight: "1.7",
+              color: "#cbd5e1",
+              whiteSpace: "pre-wrap"
+            }}>
+              {aiWeeklyReview}
+            </div>
+          ) : (
+            <div style={{
+              backgroundColor: "rgba(15, 23, 42, 0.5)",
+              border: "1px dashed rgba(139, 92, 246, 0.3)",
+              borderRadius: "12px",
+              padding: "20px",
+              textAlign: "center",
+              color: "#94a3b8",
+              fontSize: "13px"
+            }}>
+              💡 Klik tombol <b>"⚡ Hasilkan Evaluasi AI Coach Minggu Ini"</b> di atas untuk mendapatkan analisis kuantitatif dan rekomendasi kualitatif AI untuk transaksi minggu ini.
+            </div>
+          )}
         </div>
 
         {/* Section 1: Chart Screenshot Gallery */}

@@ -1,0 +1,416 @@
+
+--- Page 1 ---
+D O K U M E N  P E R E N C A N A A N  &  P E R A N C A N G A N  S I S T E M
+Trading Edge
+Intelligence SystemPersonal Trading Journal & Edge Discovery Engine
+untuk trading manual futures crypto — dirancang untuk
+mengukur, memvalidasi, dan menjaga edge trading
+pribadi berbasis data, bukan asumsi.
+DISUSUN UNTUK
+Lastico
+VERSI DOKUMEN
+1.0 — Perencanaan Awal
+STATUS PROYEK
+Fase Perancangan
+--- Page 2 ---
+Daftar Isi
+Ringkasan Dokumen
+01 Ringkasan Eksekutif 3
+02 Latar Belakang & Masalah 4
+03 Ruang Lingkup Proyek 5
+04 Filosofi & Prinsip Sistem 6
+05 Evaluasi Konsep Awal & Penyempurnaan 7
+06 Arsitektur Sistem 9
+07 Struktur Data Konseptual 10
+08 Detail Input Manual: Quick-Tag Capture 11
+09 Modul Sistem 13
+10 Metrik Analitik Utama 14
+11 Konsep Edge Blueprint 15
+12 Kriteria Validasi Edge 16
+13 Model Status Kematangan Sistem 17
+14 Roadmap Pengembangan 18
+15 Visi Masa Depan (Di Luar Scope Saat Ini) 19
+16 Pertanyaan Terbuka & Langkah Selanjutnya 20
+2
+--- Page 3 ---
+01
+Ringkasan Eksekutif
+Trading Edge Intelligence System (TEIS) adalah sistem journaling dan analitik pribadi untuk trading manual futures crypto,
+dengan  tujuan  tunggal:  menemukan  dan  memvalidasi  edge  trading  yang  menghasilkan  expected  value  (EV)  terbaik
+berdasarkan data historis milik sendiri — bukan berdasarkan perasaan atau asumsi.
+Sistem  ini  bukan trading  bot  dan  bukan sinyal  trading.  Sistem  ini  tidak  terhubung  dengan  proyek  bot  Solana  yang  sudah  berjalan
+(sumber_makmur_projek). TEIS berdiri sendiri sebagai fondasi riset pribadi, dengan kemungkinan di masa depan menjadi basis bagi proyek
+bot yang sepenuhnya terpisah — dibangun dari edge yang sudah terbukti secara statistik, bukan dari template setup Smart Money Concept
+(SMC) yang umum dipakai orang lain.
+Dokumen ini merangkum seluruh diskusi perencanaan: evaluasi terhadap konsep whitepaper awal, koreksi terhadap beberapa asumsi yang
+berisiko (overfitting, bias psikologis dalam pencatatan, target berbasis kalender), serta rancangan arsitektur dan roadmap yang disesuaikan
+dengan ruang lingkup sebenarnya.
+Inti Filosofi dalam Satu Kalimat
+"Bangun mesin yang membuat trader menjadi semakin baik setiap kali selesai melakukan trade — bukan mesin yang menggantikan
+keputusan trader."
+3
+--- Page 4 ---
+02
+Latar Belakang & Masalah
+Sebagian  besar  trader  kesulitan  berkembang  bukan  karena  tidak  memiliki  strategi,  tetapi  karena  tidak  memiliki  sistem  yang  mampu
+mengevaluasi kualitas strategi tersebut secara objektif. Trader cenderung hanya mengingat beberapa trade terakhir, sehingga keputusan
+dipengaruhi oleh  recency bias dan emosi: tiga kali loss dianggap strategi buruk, lima kali win dianggap strategi sempurna — padahal
+keduanya belum tentu benar secara statistik.
+Trading journal konvensional pada umumnya hanya berfungsi sebagai tempat penyimpanan data, bukan alat untuk menemukan edge.
+Journal semacam itu tidak mampu menjawab pertanyaan mendasar seperti:
+Setup apa yang benar-benar profitable, dan mana yang hanya kelihatan bagus?
+Kondisi market seperti apa yang membuat performa saya bagus atau buruk?
+Apakah target profit (TP) saya terlalu jauh, atau stop loss (SL) terlalu sempit?
+Apakah kondisi psikologis saat entry memengaruhi hasil trade?
+TEIS dirancang untuk menjawab pertanyaan-pertanyaan ini dengan pendekatan yang lebih disiplin: setiap trade adalah data, edge harus
+dapat diukur, dan keputusan dibuat berdasarkan statistik — bukan perasaan.
+• 
+• 
+• 
+• 
+4
+--- Page 5 ---
+03
+Ruang Lingkup Proyek
+Bagian ini penting karena beberapa diskusi awal sempat melebar ke arah scanner, rekomendasi otomatis, dan auto trading. Ruang lingkup
+berikut adalah hasil klarifikasi final.
+TERMASUK DALAM SCOPE TEIS SAAT INI
+Journaling trading manual pribadi di pasar futures crypto
+Pencatatan konteks market, setup, eksekusi, dan psikologi saat entry
+Analitik statistik atas data historis (win rate, expectancy, profit factor, dsb)
+Penemuan (discovery) dan validasi edge pribadi berbasis EV, bukan sekadar win rate
+Pemantauan (monitoring) apakah edge yang sudah ditemukan masih "hidup" dari waktu ke waktu
+DI LUAR SCOPE SAAT INI (DITUNDA / PROYEK TERPISAH)
+Market scanner untuk mencari coin lain secara otomatis
+Recommendation engine real-time / sinyal entry
+Semi-auto atau auto trading dalam bentuk apapun
+sumber_makmur_projek (bot Solana berbasis whale wallet monitoring & XGBoost) — proyek terpisah total, tidak ada
+ketergantungan data maupun arsitektur dengan TEIS
+Bot trading masa depan yang direncanakan setelah edge tervalidasi — ini proyek baru yang berbeda dari
+sumber_makmur_projek dan tidak berbasis setup SMC template umum (dibahas di Bab 15 sebagai visi masa depan, bukan
+bagian dari pengerjaan sekarang)
+Pemisahan scope ini sengaja dibuat tegas agar TEIS tidak berkembang menjadi proyek yang terlalu besar sebelum fondasi datanya benar-benar solid.
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+5
+--- Page 6 ---
+04
+Filosofi & Prinsip Sistem
+Lima Prinsip Dasar
+Prinsip Penjelasan
+Every Trade Is Data Setiap trade, menang maupun kalah, sama-sama memberikan informasi yang berharga.
+Edge Is Measured Edge tidak boleh berdasarkan perasaan; edge harus dapat diukur secara statistik.
+Statistics Over EmotionKeputusan dibuat berdasarkan data historis, bukan reaksi emosional terhadap trade terakhir.
+Continuous Learning Semakin banyak trade tercatat dengan baik, semakin akurat insight yang dihasilkan sistem.
+No Holy Grail Tidak ada setup yang sempurna — yang ada hanyalah setup dengan expectancy tertinggi pada kondisi tertentu.
+Penyempurnaan Filosofi
+Dari diskusi lanjutan, filosofi ini disempurnakan menjadi lebih akurat:
+"Mengukur dan memodelkan edge trading pribadi" — bukan "menemukan edge" sekali lalu selesai. Edge adalah sesuatu yang terus
+diukur, divalidasi ulang, dan bisa berubah seiring waktu.
+Target  sistem  juga  diubah  orientasinya:  bukan  mencari  probabilitas  (win  rate)  tertinggi,  melainkan  mencari  Expected  Value  (EV)
+tertinggi. Setup dengan win rate 85% tetapi RR 1:0.6 belum tentu lebih menguntungkan jangka panjang dibanding setup dengan win rate
+45% tetapi RR 1:3 — expectancy-lah yang menentukan, bukan frekuensi menang.
+6
+--- Page 7 ---
+05
+Evaluasi Konsep Awal & Penyempurnaan
+Bagian ini merangkum kritik dan penyesuaian penting terhadap rancangan awal, hasil dari beberapa putaran diskusi.
+Kekuatan Rancangan Awal
+DIPERTAHANKAN
+Pemisahan data ke beberapa tabel (Trade, Market Context, Setup, Execution, Psychology) — memungkinkan analisis multi-
+dimensi
+Fokus pada EV/expectancy dibanding win rate sebagai metrik utama
+Konsep coverage: jumlah trade per kondisi market (bull, bear, range, volatilitas), bukan sekadar total trade
+Model status kematangan bertahap (Learning → Research → Validation → Production → Monitoring)
+Konsep Shadow Mode / paper validation sebelum edge benar-benar dipercaya
+Risiko yang Perlu Dikoreksi
+1. OVERFITTING PADA PATTERN DISCOVERY
+Semakin  banyak  kombinasi  tag  setup  yang  dicoba  (OB,  liquidity  sweep,  session,  dsb),  semakin  besar  peluang  menemukan
+kombinasi yang  terlihat profitable padahal hanya kebetulan statistik (multiple comparisons problem). Mitigasi: tetapkan ambang
+minimum sampel per kombinasi sebelum insight ditampilkan, gunakan interval kepercayaan (bukan angka win rate tunggal), dan
+validasi pola pada data baru yang belum pernah dilihat sistem (out-of-sample), bukan hanya fitting ke seluruh histori sekaligus.
+2. HINDSIGHT BIAS PADA PENCATATAN SETUP
+Jika tag setup diisi setelah hasil trade diketahui, trader cenderung — tanpa sadar — men-tag lebih rapi saat menang. Mitigasi: tag
+setup dan kondisi psikologis harus dikunci (immutable) pada saat entry, sebelum outcome diketahui.
+3. TAKSONOMI SETUP YANG BISA BERGESER
+Definisi pribadi tentang "OB" atau "CHOCH" bisa berubah seiring pengalaman. Trade lama dan baru berisiko tidak apple-to-apple jika
+definisi berubah tanpa jejak. Mitigasi: taksonomi setup perlu versi (versioning), bukan daftar tag statis yang diam-diam berubah
+makna.
+4. TARGET BERBASIS KALENDER VS BERBASIS DATA
+Roadmap yang menetapkan target bulan-ke-bulan (mis. "Edge Scoring selesai bulan ke-9") bertentangan dengan prinsip sistem
+sendiri bahwa kesiapan edge ditentukan oleh volume dan kualitas data, bukan waktu. Trader diskresioner dengan frekuensi rendah
+bisa  butuh  bertahun-tahun  untuk  mencapai  volume  trade  yang  cukup.  Mitigasi:  seluruh  milestone  pada  roadmap  (Bab  14)
+menggunakan satuan jumlah trade per kategori dan stabilitas metrik, bukan satuan bulan.
+5. DATA PSIKOLOGI SEMPAT TERLEWAT
+Diskusi  lanjutan  yang  lebih  "quant-framing"  (EV,  coverage,  statistik)  sempat  tidak  menyinggung  data  psikologis  (FOMO,  stres,
+revenge trading, kepatuhan pada plan). Untuk trading manual/diskresioner, ini justru salah satu data paling bernilai karena keputusan
+dipengaruhi kondisi mental saat eksekusi — bukan hanya kualitas setup di atas kertas. Data ini dikembalikan sebagai komponen inti,
+sejajar dengan data setup dan market context.
+• 
+• 
+• 
+• 
+• 
+7
+--- Page 8 ---
+6. CONFIDENCE LAYER — DITUNDA KE FASE LANJUT
+Ide menyesuaikan win rate historis berdasarkan kemiripan kondisi market hari ini menarik, tetapi secara teknis ini adalah model
+kemiripan/regime-detection tersendiri yang mudah menjadi "angka presisi palsu" jika dibangun terlalu dini. Fitur ini ditempatkan
+sebagai pengembangan lanjutan setelah Edge Discovery dan Edge Validation benar-benar matang dengan data yang cukup besar.
+8
+--- Page 9 ---
+06
+Arsitektur Sistem
+Arsitektur direvisi dari alur linear menjadi alur dengan dua jalur input (data objektif dan data subjektif) serta loop umpan balik eksplisit dari
+hasil analitik kembali ke proses pembelajaran.
+Dua Jalur Input Data
+Jalur Sumber Karakteristik
+Data Objektif Exchange API (harga, waktu, size, fee, funding rate,
+OI) + data market eksternal (ATR, volume,
+dominance, fear & greed)
+Bisa diambil otomatis. Tidak butuh interpretasi manusia,
+murni angka pasar.
+Data Subjektif Input manual cepat oleh trader saat/segera setelah
+entry
+Setup yang digunakan, alasan entry, kondisi psikologis.
+Tidak bisa diotomatisasi karena butuh judgment manusia.
+Dirancang seringan mungkin (tap-based) untuk menekan
+friksi pencatatan.
+Alur Sistem
+Exchange API→ Quick Capture Manual→ Data Collector→ Database
+Database→ Analytics Engine→ Edge Discovery→ Edge Validation→ Dashboard / AI Coach
+Dashboard / AI Coach→ Trader → Trade Berikutnya→ (kembali ke Data Collector)
+Perbedaan dari rancangan awal: arsitektur ini eksplisit berbentuk loop tertutup (closed loop), bukan alur satu arah. Hasil analitik memengaruhi keputusan trade
+berikutnya, yang lalu menjadi data baru bagi sistem.
+Prinsip Desain Arsitektur
+Non-intrusive capture — tidak boleh mengganggu proses eksekusi trading itu sendiri
+Immutable snapshot — data setup & psikologi dikunci begitu disimpan, tidak bisa diedit setelah outcome trade diketahui
+Separation of concerns — TEIS tidak memiliki dependency apapun terhadap sistem bot lain
+Insight, bukan sinyal — output sistem selalu berbentuk informasi historis ("secara historis, setup ini menghasilkan X"), bukan perintah
+aksi ("BUY sekarang")
+• 
+• 
+• 
+• 
+9
+--- Page 10 ---
+07
+Struktur Data Konseptual
+Berikut kategori data pada level konsep (belum skema teknis / kolom database final — akan dirancang pada tahap berikutnya).
+Kategori Contoh Atribut
+Trade ID trade, pair, arah (long/short), entry, exit, SL, TP, margin, leverage, risk, RR, profit, fee, holding time, sumber data
+(manual/objektif)
+Market Context Trend HTF/LTF, ATR, volume, session, hari, jam, BTC dominance, fear & greed index, funding rate, open interest
+Setup Tag setup sesuai taksonomi pribadi (versi taksonomi dicatat), confluence count
+Execution Tipe order, partial TP, scale in/out, BE, trailing
+Psychology Level confidence, stres, indikasi FOMO/revenge, kepatuhan pada plan, catatan bebas
+Screenshot Before entry, during trade, exit — untuk review visual, opsional untuk fase awal
+Catatan: taksonomi Setup sebaiknya dirancang dapat diperluas (extensible tagging), bukan kolom tetap, agar tidak terkunci hanya pada metodologi SMC apabila
+strategi berkembang di kemudian hari.
+10
+--- Page 11 ---
+08
+Detail Input Manual: Quick-Tag Capture
+Bagian ini menjawab pertanyaan yang sering muncul di tahap implementasi: apa sebenarnya bentuk "input manual" pada
+jalur data subjektif (Bab 06)? Jawabannya bukan satu bentuk tunggal — ada tiga jenis input manual dengan peran yang
+sangat berbeda, dan hanya satu di antaranya yang menjadi bahan utama Analytics Engine dan Edge Discovery Engine.
+Jenis Input Bentuk Diproses Engine? Peran
+Quick-Tag TerstrukturCheckbox, dropdown, slider — bukan
+tulisan bebas
+Ya, ini bahan utama statistikSumber data untuk seluruh
+analitik & edge discovery
+Screenshot Chart Gambar before entry / during trade / exitTidak (di fase awal) Bahan review visual manual,
+pelengkap saat evaluasi
+mingguan
+Catatan Bebas Teks bebas, opsional Tidak Jejak konteks tambahan untuk
+dibaca ulang, bukan data terukur
+Kenapa Bukan Analisis Chart / Screenshot yang Jadi Data Utama
+Screenshot TradingView dan tulisan analisis bebas tidak bisa langsung dihitung, dikelompokkan, atau dicari korelasinya oleh Analytics
+Engine — bentuknya tidak terstruktur. Agar sebuah trade bisa masuk ke perhitungan expectancy per setup, per kondisi market, atau per
+kondisi psikologis (Bab 09–11), datanya harus sudah dalam bentuk kategori/angka yang konsisten sejak awal. Itu sebabnya Quick-Tag
+Terstruktur menjadi satu-satunya input manual yang wajib diisi; dua lainnya bersifat opsional dan tidak memengaruhi kualitas analitik inti jika
+terlewat.
+Contoh Field Quick-Tag Terstruktur
+Ilustrasi field yang diisi dalam hitungan detik saat/segera setelah entry (daftar setup menyesuaikan taksonomi pribadi Anda, lihat Bab 16):
+Field Tipe Input Contoh Opsi
+Setup Multi-checkbox Liquidity Sweep, Order Block, FVG, CHOCH, BOS, Equal High/Low
+Bias Arah Dropdown Bull Trend, Bear Trend, Range
+Sesi Dropdown (auto-detect
+dari waktu, bisa dikoreksi)
+Asia, London, New York
+Confidence Saat Entry Slider 1–10 —
+Kondisi Psikologis Multi-checkbox Sesuai Plan, FOMO, Revenge Trade, Kurang Tidur/Lelah, Tenang
+Kepatuhan pada Plan Toggle Ya/Tidak —
+PRINSIP DESAIN QUICK-TAG
+Target waktu pengisian di bawah 15 detik. Seluruhnya berbasis tap/pilih, bukan mengetik. Field dikunci (immutable) begitu disimpan
+— tidak bisa diedit lagi setelah outcome trade diketahui, untuk mencegah hindsight bias (Bab 05). 
+Posisi Screenshot & Catatan Bebas
+Keduanya tetap berguna sebagai pelengkap kualitatif — misalnya saat review mingguan, Anda membuka ulang screenshot untuk mengecek
+detail chart yang tidak tertangkap oleh tag terstruktur. Namun keduanya sengaja ditempatkan sebagai lapisan opsional: fitur pembacaan
+otomatis dari screenshot (Computer Vision) hanya masuk sebagai rencana jangka panjang di roadmap (Bab 14), dan tidak disarankan
+11
+--- Page 12 ---
+diandalkan pada fase-fase awal karena akurasi membaca konsep interpretatif seperti "apakah ini CHOCH" dari gambar masih sangat sulit
+dicapai dengan baik.
+12
+--- Page 13 ---
+09
+Modul Sistem
+Modul Fungsi
+Trade Collection Menyimpan seluruh data trade dari dua jalur input (objektif + subjektif)
+Market Context Collector Mengambil dan mencocokkan kondisi market pada saat entry berdasarkan timestamp
+Analytics Engine Menghitung metrik statistik dasar (lihat Bab 9)
+Edge Discovery Engine Mencari kombinasi setup + kondisi market dengan expectancy terbaik, dengan ambang sampel minimum dan
+interval kepercayaan
+Edge Validation Engine Menguji stabilitas, keberulangan, dan robustness edge yang ditemukan (lihat Bab 11)
+AI Coach Memberi evaluasi kontekstual setelah trade selesai, dibandingkan dengan histori setup serupa
+Status Monitor Memantau apakah edge yang sudah divalidasi masih konsisten performanya dari waktu ke waktu
+Dashboard Menampilkan seluruh hasil analitik, equity curve, dan insight kepada trader
+13
+--- Page 14 ---
+10
+Metrik Analitik Utama
+FREKUENSI
+Win Rate
+RASIO
+Average RR
+UTAMA
+Expectancy
+KUALITAS
+Profit Factor
+RISIKO
+Max Drawdown
+EFISIENSI
+MFE / MAE
+PEMULIHAN
+Recovery Factor
+WAKTU
+Avg Holding Time
+Expectancy ditetapkan sebagai metrik headline di dashboard (bukan win rate), karena mencerminkan langsung profitabilitas jangka panjang
+per unit risiko:
+FORMULA EXPECTANCY
+Expectancy (R) = (Win Rate × Average Win) − (Loss Rate × Average Loss)
+Seluruh metrik ini wajib dapat difilter berdasarkan dimensi coverage: kondisi market (bull/bear/range), sesi, rentang volatilitas, dan pair —
+bukan hanya ditampilkan sebagai angka agregat tunggal.
+14
+--- Page 15 ---
+11
+Konsep Edge Blueprint
+Setelah  volume  data  mencukupi,  sistem  menyusun  "blueprint"  edge  —  kombinasi  setup  dan  kondisi  yang  terbukti  secara  historis
+menghasilkan expectancy positif dan konsisten. Contoh ilustrasi:
+Edge Karakteristik RR Expectancy
+Edge A Trend Continuation — Bull Trend + Liquidity
+Sweep + OB + Demand
+1 : 2.5 +1.01R
+Edge B Range Trading — Equal High + Liquidity
+Sweep + Mean Reversion
+1 : 1.8 +0.72R
+Edge C Breakout tanpa konfirmasi tambahan 1 : 2.0 −0.12R
+Blueprint semacam ini memungkinkan trader mengenali secara objektif setup mana yang benar-benar cocok dengan gaya eksekusinya
+sendiri  —  termasuk  kemungkinan  mengejutkan,  misalnya  menyadari  bahwa  setup  yang  selama  ini  dianggap  andalan  justru  memiliki
+expectancy negatif ketika diuji dengan data yang cukup besar.
+15
+--- Page 16 ---
+12
+Kriteria Validasi Edge
+Edge tidak dianggap valid hanya karena jumlah trade tertentu tercapai. Tiga syarat berikut harus dipenuhi bersamaan:
+1. Stabil
+Expectancy tidak berfluktuasi liar antar periode. Contoh: 500 trade pertama 0.82R, 500 berikutnya 0.84R, 500 berikutnya lagi 0.81R — pola
+ini menunjukkan stabilitas.
+2. Berulang (Repeatable)
+Edge tetap menunjukkan performa baik meski diuji lintas pair berbeda, bulan berbeda, dan sesi berbeda — bukan hanya bekerja pada satu
+kondisi spesifik yang kebetulan menguntungkan.
+3. Robust
+Performa tidak runtuh drastis saat parameter kecil diubah (TP sedikit lebih dekat/jauh, SL sedikit lebih longgar/ketat). Edge yang terlalu
+sensitif terhadap parameter presisi biasanya tanda overfitting terhadap data historis, bukan edge yang nyata.
+PRINSIP PENENTUAN KESIAPAN EDGE
+Target bukan berupa jumlah trade tetap (mis. "500 trade"), melainkan tingkat keyakinan terhadap edge: volume trade mencukupi per
+kategori, coverage kondisi market memadai, dan tiga syarat di atas terpenuhi secara bersamaan. 
+16
+--- Page 17 ---
+13
+Model Status Kematangan Sistem
+Setiap edge yang ditemukan sistem melewati status berikut. Karena scope TEIS saat ini adalah journaling (bukan bot), status "Production"
+berarti edge sudah layak dipakai sebagai basis keputusan entry manual — bukan berarti otomatisasi aktif.
+Status Arti
+1. Learning Masih mengumpulkan data, belum cukup sampel untuk disimpulkan apapun
+2. Research Pola awal mulai terlihat, tetapi sampel per kombinasi masih kecil
+3. Validation Pola diuji terhadap kriteria stabil, berulang, dan robust
+4. Production Edge dinyatakan cukup terpercaya untuk menjadi acuan keputusan entry manual trader
+5. Monitoring Edge terus dipantau; sistem memberi peringatan jika expectancy mulai menurun signifikan dari histori (indikasi karakter
+market berubah)
+17
+--- Page 18 ---
+14
+Roadmap Pengembangan
+Roadmap disusun berdasarkan kesiapan data dan fungsi, bukan target kalender, sesuai koreksi pada Bab 5.
+Fase 1 — Fondasi Pencatatan Data
+Tujuan: tidak kehilangan satu data pun. Membangun struktur database, mekanisme capture objektif (API) dan subjektif (manual cepat),
+memastikan setiap trade tercatat lengkap dan konsisten sejak hari pertama.
+Fase 2 — Analitik Dasar
+Tujuan: memahami diri sendiri sebagai trader, bukan memahami market. Dashboard menampilkan metrik dasar (Bab 9) begitu volume data
+mulai memadai (indikatif mulai terlihat bermakna di kisaran ratusan trade, bukan target pasti).
+Fase 3 — Edge Discovery
+Tujuan: menemukan kombinasi setup dan kondisi market dengan expectancy terbaik, dengan safeguard terhadap overfitting (ambang
+sampel minimum, interval kepercayaan).
+Fase 4 — Edge Validation
+Tujuan: menguji setiap edge kandidat terhadap tiga kriteria (stabil, berulang, robust) sebelum dianggap layak menjadi acuan keputusan.
+Fase 5 — Status Monitoring & AI Coach
+Tujuan: menjaga edge yang sudah tervalidasi tetap relevan, memberi peringatan dini saat performa mulai menyimpang dari histori, serta
+memberi evaluasi kontekstual per trade.
+DI LUAR ROADMAP INI
+Scanner, recommendation engine real-time, semi-auto, dan auto trading tidak termasuk dalam lima fase di atas. Fase-fase tersebut
+hanya relevan apabila proyek bot terpisah pada Bab 15 benar-benar dimulai di kemudian hari. 
+18
+--- Page 19 ---
+15
+Visi Masa Depan (Di Luar Scope Saat Ini)
+Bagian ini murni dokumentasi arah pemikiran jangka panjang, bukan bagian dari pengerjaan sekarang, dan sengaja dipisah agar tidak
+mengaburkan fokus lima fase di Bab 14.
+Setelah dataset TEIS cukup besar dan sejumlah edge sudah melewati status Production secara konsisten, ada rencana membangun proyek
+bot baru — terpisah total dari sumber_makmur_projek maupun dari TEIS itu sendiri sebagai sistem. Perbedaan mendasarnya:
+Bot Berbasis Template SMC UmumBot Visi Masa Depan (dari TEIS)
+Sumber logika Aturan setup SMC generik yang dipakai
+banyak orang
+Edge yang tervalidasi secara statistik dari histori
+keputusan trader sendiri
+Dasar keputusan Asumsi bahwa pola SMC tertentu selalu
+valid
+Data ribuan trade pribadi dengan expectancy terbukti
+pada kondisi spesifik
+Karakter Generik, sama untuk siapa saja yang
+memakai strategi serupa
+Personal — mencerminkan cara berpikir dan gaya
+eksekusi trader itu sendiri
+Prinsip yang dipegang untuk visi ini:  "Bot dibuat sesuai dengan edge yang telah dibuktikan oleh data, bukan sesuai dengan edge yang
+diinginkan atau diyakini secara subjektif." Tahapannya nanti — bila memang dilanjutkan — mengikuti urutan bertahap: edge tervalidasi →
+stress test → paper trading / shadow mode → semi-auto → auto trading, dengan checklist kesiapan yang ketat sebelum otomatisasi
+diaktifkan.
+Sekali lagi: seluruh bagian ini adalah rencana jangka panjang yang belum dieksekusi. Prioritas saat ini sepenuhnya berada di Fase 1–5 pada Bab 14.
+19
+--- Page 20 ---
+16
+Pertanyaan Terbuka & Langkah Selanjutnya
+Dokumen ini adalah rancangan konseptual. Beberapa keputusan teknis berikut perlu dibahas dan ditentukan sebelum implementasi dimulai:
+Skema database final — nama tabel, kolom, tipe data, relasi antar tabel, berdasarkan struktur konseptual di Bab 7
+Alur capture data saat entry — bentuk antarmuka quick-tag (contoh field pada Bab 8) agar pencatatan setup dan psikologi tidak
+menambah friksi saat trading berlangsung
+Definisi taksonomi setup pribadi — daftar tag setup yang dipakai beserta definisi dan sistem versioning-nya
+Sumber data market eksternal — API mana yang dipakai untuk funding rate, open interest, fear & greed index, dan lainnya
+Ambang statistik Edge Discovery — angka minimum sampel per kombinasi setup dan tingkat kepercayaan yang dipakai
+REKOMENDASI URUTAN PEMBAHASAN SELANJUTNYA
+Skema database final → Alur capture data → Taksonomi setup → Formula & ambang statistik Analytics/Edge Discovery Engine. 
+1. 
+2. 
+3. 
+4. 
+5. 
+20

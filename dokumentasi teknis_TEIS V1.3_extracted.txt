@@ -1,0 +1,1072 @@
+
+--- Page 1 ---
+D O K U M E N T A S I  T E K N I S  ·  T E C H N I C A L  D E S I G N  D O C U M E N T
+Trading Edge
+Intelligence SystemRancangan teknis: arsitektur, skema database, integrasi
+Binance API, dan alur statistik Edge Discovery Engine.
+Versi 1.4 — Audit Mockup vs Skema
+DISUSUN UNTUK
+Lastico
+STACK
+Python (FastAPI) · MySQL 8
+STATUS
+Draft Teknis — Revisi
+--- Page 2 ---
+Daftar Isi
+Ringkasan Dokumen
+01 Ringkasan & Prinsip Desain 3
+02 Catatan Revisi v1.1–v1.4 3
+03 Arsitektur Sistem 6
+04 Alur Data (Data Flow) 7
+05 Daftar Fitur Lengkap per Modul 8
+06 Skema Database (MySQL) 11
+07 Integrasi Binance API 15
+08 Edge Discovery Engine — Ambang Statistik 17
+09 Alur Immutable Data & Koreksi 20
+10 Keamanan (Security Design) 21
+11 Backup & Disaster Recovery 21
+12 Non-Functional Requirements 21
+13 Mockup UI/UX per Fitur 22
+14 Ringkasan Tech Stack 27
+15 Pemetaan ke Roadmap 28
+2
+--- Page 3 ---
+01
+Ringkasan & Prinsip Desain
+Dokumen ini adalah turunan teknis dari Dokumen Perencanaan & Perancangan TEIS v1.0. Versi 1.1 merevisi empat celah kritis
+dari audit silang pertama; v1.2 memperjelas alur end-to-end & preferensi platform; v1.3 menambahkan Historical Import, metrik
+margin/equity, dan equity snapshot real; v1.4 mengaudit seluruh mockup Bab 13 terhadap skema Bab 06 — lihat Bab 02 untuk
+rincian tiap versi.
+Keputusan stack final: Database MySQL 8, backend full Python (FastAPI untuk REST API, Celery untuk background job, pandas/NumPy/SciPy/
+statsmodels untuk lapisan analitik & statistik). Exchange yang didukung: Binance Futures (USDT-M). Sistem dirancang single-user untuk
+kebutuhan personal.
+Prinsip Desain yang Tetap Dipegang
+Prinsip Implikasi Teknis
+Non-intrusive capture Quick-Tag harus bisa diisi <15 detik, offline-first, tidak boleh memblokir proses trading
+Immutable snapshot Kolom locked_at + trigger DB menolak update setelah terkunci — kini mencakup seluruh tabel data
+subjektif, bukan hanya trades (lihat Bab 06 & 09)
+Separation of concerns TEIS tidak punya dependency apapun ke proyek bot lain (database, service, dan kredensial terpisah total)
+Insight, bukan sinyal Seluruh output Analytics/Edge Engine bersifat historis-deskriptif, tidak pernah berupa perintah eksekusi otomatis
+Sesuai gaya eksekusi nyataTrader hanya menggunakan SL/TP sesuai setup awal — tidak ada partial TP atau scale in/out. Skema
+disederhanakan sesuai ini, bukan dirancang generik untuk kasus yang tidak pernah terjadi.
+02
+Catatan Revisi v1.1–v1.4
+Empat celah berikut ditemukan pada audit silang antara Dokumen Perencanaan v1.0 dan draft teknis pertama, dan sudah diperbaiki di skema
+Bab 06.
+1. TABEL EXECUTION — SEBELUMNYA HILANG TOTAL DARI SKEMA
+Bab 7 Dokumen Perencanaan menyebutkan Execution sebagai satu dari enam kategori data inti, tapi tidak terwakili di skema teknis
+pertama. Diperbaiki: ditambahkan tabel trade_execution (Bab 06.4), disesuaikan dengan gaya eksekusi Anda yang sebenarnya —
+single entry, single exit di SL/TP, tanpa partial close.
+2. RELASI TRADES ↔ EXCHANGE_FILLS TIDAK BISA MENAMPUNG ENTRY & EXIT SEBAGAI FILL TERPISAH
+Skema pertama memakai satu kolom  exchange_fill_id di tabel  trades — hanya bisa merujuk satu fill, padahal setiap trade
+tertutup minimal punya dua fill dari Binance (fill pembukaan posisi dan fill penutupan). Diperbaiki: diganti dengan tabel penghubung
+trade_fills (Bab 06.3) yang memetakan peran  entry/exit secara eksplisit. Karena tidak ada partial TP/scale in-out, umumnya
+cukup dua baris per trade — tapi strukturnya tetap benar secara relasional.
+3. FIELD "BIAS ARAH" DARI QUICK-TAG TIDAK PUNYA KOLOM PENYIMPANAN
+Ambigu antara field subjektif "Bias Arah" (Bab 8 Dokumen Perencanaan) dan kolom  trend_htf/trend_ltf yang sumber datanya
+tidak didefinisikan.  Diperbaiki: dipisah tegas dua konsep berbeda —  trend_htf/trend_ltf kini eksplisit dihitung otomatis oleh
+Market Context Collector (aturan objektif berbasis EMA), sedangkan bias_arah_manual adalah kolom baru yang diisi trader lewat
+3
+--- Page 4 ---
+Quick-Tag saat entry. Selisih antara keduanya nantinya bisa jadi data menarik tersendiri (apakah bias subjektif Anda sering meleset dari
+kondisi objektif).
+4. IMMUTABILITY HANYA BERLAKU DI TABEL TRADES, TIDAK DI PSYCHOLOGY & TRADE_SETUP_TAGS
+Padahal data yang paling penting dikunci (untuk mencegah hindsight bias) justru data subjektif ini.  Diperbaiki: trigger DB pada
+psychology dan trade_setup_tags kini merujuk status locked_at milik trades induknya dan menolak UPDATE/DELETE begitu
+trade tersebut terkunci (Bab 09).
+Revisi v1.2 — Klarifikasi Alur & Preferensi Platform
+Lima perubahan berikut berasal dari sesi klarifikasi alur end-to-end, di mana ditemukan bahwa dokumen v1.1 belum menjelaskan bagaimana
+sebuah trade terdeteksi dan mengalir dari Binance sampai tercatat lengkap di TEIS.
+5. QUICK-TAG: MOBILE PWA → FULL WEB APP
+Prioritas kemudahan testing di local mengubah keputusan platform. Diperbaiki: Quick-Tag kini murni web app responsive (bisa dibuka
+dari desktop maupun browser HP tanpa install), offline-first & IndexedDB dihapus dari desain — kompleksitas itu tidak dibutuhkan kalau
+asumsinya selalu ada koneksi ke server. Lihat Bab 05.2 & mockup 13.1 yang direvisi.
+6. ALUR DETEKSI TRADE BARU SEBELUMNYA TIDAK DIJELASKAN SAMA SEKALI
+Dokumen  v1.1  mengasumsikan  Quick-Tag  "muncul"  tanpa  menjelaskan  pemicunya.  Diperbaiki: ditambahkan  Bab  07.4  yang
+menjelaskan  Binance  Sync  Service  melakukan  polling  posisi  terbuka  secara  berkala,  membuat  "trade  shell"  begitu  posisi  baru
+terdeteksi, lalu memicu notifikasi ke web app. Lihat juga Bab 04 (diagram alur direvisi).
+7. ATURAN TREND_HTF/TREND_LTF DISEDERHANAKAN KE EMA50 SAJA
+Sebelumnya EMA50 vs EMA200. Diperbaiki: kini murni berbasis posisi harga terhadap EMA50 + arah slope-nya, dengan HTF = 4 Jam
+dan LTF = 1 Jam, sesuai gaya analisis Anda. Lihat Bab 05.3.
+8. TELEGRAM DIHAPUS, DIGANTI TIGA CHANNEL NOTIFIKASI SEKALIGUS
+Telegram jarang dibuka sehingga tidak efektif sebagai satu-satunya channel. Diperbaiki: ditambahkan Notification Service (Bab 05.13)
+yang mengirim ke tiga channel bersamaan — banner in-app, Web Push, dan email — supaya alert (baik "trade baru perlu di-tag"
+maupun "edge menurun") punya peluang lebih besar terlihat. Semua channel dipilih karena sama-sama mudah diuji di local.
+9. DETAIL TRANSISI STATUS & AMBANG STATISTIK EDGE DISCOVERY DIPERJELAS
+Sebelumnya tabel ambang sampel berdiri sendiri tanpa penjelasan proses. Diperbaiki: Bab 08 diperluas dengan penjelasan eksplisit
+bagaimana kombinasi tag dibentuk, bagaimana bootstrap CI & Wilson Score dihitung, kapan job batch vs kalkulasi real-time dipakai,
+dan aturan lengkap turun status Production → Monitoring.
+Revisi v1.3 — Historical Import, Metrik Margin/Equity, Equity Snapshot Real
+Tiga penambahan berikut disepakati masuk ke versi 1 aplikasi. Ketiganya ditempatkan dengan batasan arsitektur tertentu supaya tidak
+mengganggu bagian yang sudah terbukti benar — lihat penjelasan "kenapa ditempatkan di sini" di tiap poin.
+10. HISTORICAL IMPORT — MENARIK RIWAYAT TRADE SEBELUM TEIS ADA
+Sebelumnya TEIS hanya mendeteksi trade baru ke depan (Bab 07.4); riwayat lama di Binance tidak pernah masuk. Ditambahkan: Bab
+07.5 (Historical Import Service) dan tabel diperbarui dengan penanda sumber data. Batasan penting: hanya data  objektif yang bisa
+4
+--- Page 5 ---
+ditarik (entry, exit, PnL, fee) — data subjektif (setup, psikologi) tidak bisa direkonstruksi tanpa risiko hindsight bias, jadi trade hasil import
+tidak pernah ikut dihitung Edge Discovery, dan ditandai jelas di UI (Bab 13.4) supaya tidak mengaburkan metrik headline.
+11. METRIK RETURN ON MARGIN & DAMPAK TERHADAP EQUITY
+Ditambahkan sebagai metrik deskriptif tambahan di Analytics Engine (Bab 05.5) dan Trade Detail (Bab 13.3) —  bukan bagian dari
+Edge Discovery Engine. Expectancy dalam satuan R sengaja dipertahankan sebagai satu-satunya metrik yang dipakai Edge Discovery,
+karena mencampur ukuran berbasis margin/leverage ke statistik edge akan membuat kualitas setup tercampur dengan keputusan sizing
+— dua hal yang sengaja dipisah sejak Dokumen Perencanaan. Lihat catatan eksplisit di Bab 08.
+12. EQUITY CURVE DARI SNAPSHOT SALDO REAL
+Ditambahkan: Equity Snapshot Service (Bab 05.15) dan tabel equity_snapshots (Bab 06.10) yang mengambil saldo akun asli dari
+Binance secara berkala. Kurva ini ditambahkan berdampingan dengan kurva R-kumulatif yang sudah ada — bukan menggantikannya,
+karena keduanya menjawab pertanyaan berbeda (kualitas keputusan trading vs pertumbuhan akun riil). Deposit/withdrawal dideteksi
+terpisah (tabel account_transfers) supaya tidak salah dibaca sebagai profit/loss dari trading.
+Revisi v1.4 — Audit Kesesuaian Mockup terhadap Skema Database
+Seluruh mockup Bab 13 diperiksa satu per satu terhadap skema Bab 06, dipicu oleh temuan bahwa Quick-Tag Capture tidak punya elemen
+upload screenshot padahal tabel screenshots sudah ada sejak v1.0. Hasil audit lengkap:
+13. QUICK-TAG CAPTURE — TIGA FIELD HILANG
+Ditambahkan ke mockup 13.1: upload screenshot stage  before_entry, catatan bebas (psychology.free_notes), dan pilihan
+order type (trade_execution.order_type) — ketiganya opsional, tidak memperlambat target <15 detik untuk field wajib. Lihat Bab
+05.2.
+14. TRADE DETAIL — LIMA FIELD/TAMPILAN BELUM LENGKAP
+Ditambahkan ke mockup 13.3: SL/TP rencana & perbandingan RR rencana vs realized, status breakeven/trailing di kartu Eksekusi;
+trend_ltf & ATR di kartu Market Context; catatan bebas di kartu Psikologi; leverage di kartu Margin & Equity; dan kartu Screenshot
+diubah dari sekadar label jadi thumbnail dengan tombol upload untuk stage during_trade/exit (menyusul setelah before_entry
+yang sudah diisi di Quick-Tag).
+MOCKUP LAIN SUDAH SESUAI, TIDAK DIUBAH
+13.2 (Journal List), 13.4 (Dashboard), 13.5–13.6 (Edge Blueprint), 13.7 (Weekly Review), 13.8 (Notification Service), dan 13.9 (Historical
+Import) sudah diperiksa dan field yang ditampilkan sudah konsisten dengan skema — tidak ada perubahan.
+5
+--- Page 6 ---
+03
+Arsitektur Sistem
+Arsitektur berbasis modular monolith dengan Python di seluruh backend, dipisah menjadi service-service logis yang berjalan dalam satu
+deployment (Docker Compose) — cukup untuk skala single-user, namun tetap dipisah secara kode agar mudah dipecah jadi microservice nanti
+bila diperlukan.
+Binance Futures API+ Alternative.me / CoinGecko
+Quick-Tag PWA (offline-first)→ FastAPI — REST API Gateway
+Binance Sync ServiceMarket Context CollectorTrade Collection ServiceScreenshot Manager
+MySQL 8 — Primary Datastore+ MinIO (S3-compatible)
+Analytics EngineEdge Discovery EngineEdge Validation + Status Monitor
+Dashboard (Web)+ AI Coach Service→ Trader
+Diagram 1 — Arsitektur komponen TEIS (backend full Python, MySQL, MinIO object storage)
+Lapisan Deployment
+Lapisan Teknologi Catatan
+Reverse proxy / TLS Nginx + Let's Encrypt HTTPS wajib, termasuk untuk akses dari mobile PWA
+API Backend FastAPI (Python 3.12), Uvicorn/GunicornAsync I/O untuk panggilan Binance API
+Background job Celery + Redis (broker & result backend)Sync Binance, market context fetch, edge discovery batch
+Scheduler Celery Beat Sync market context per jam, healthcheck job
+ORM & Migration SQLAlchemy 2.x + Alembic Migration terversi, wajib review sebelum apply ke production
+Database MySQL 8.0 InnoDB engine, utf8mb4
+Object storage MinIO (self-hosted, S3-compatible) Screenshot & file export
+Container orchestration Docker Compose Cukup untuk skala single-user; tidak perlu Kubernetes
+Hosting VPS pribadi Kontrol penuh atas data finansial sensitif
+6
+--- Page 7 ---
+04
+Alur Data (Data Flow)
+Alur closed-loop sesuai prinsip dokumen perencanaan: hasil analitik memengaruhi keputusan trade berikutnya, yang menjadi data baru bagi
+sistem.
+Alur Siklus Hidup Satu Trade (End-to-End)
+Sebelum melihat diagram arsitektur besar, berikut alur konkret dari Anda entry di Binance sampai trade tercatat lengkap — ini yang sebelumnya
+tidak dijelaskan eksplisit di v1.1.
+1. Anda entry di Binance Futures→ (di luar TEIS, TEIS tidak eksekusi apapun)
+2. Binance Sync Service polling posisi (~30–60 detik)→ Posisi baru terdeteksi
+3. Trade shell dibuat otomatis→ Status: pending_tag→ Notification Service terpicu
+4. Anda buka web app, isi Quick-Tag→ Window koreksi 60 detik→ locked_at terisi
+5. Market Context Collector snapshot otomatis→ Trade berjalan (dikelola di Binance)
+6. Anda close posisi di Binance→ 7. Polling berikutnya mendeteksi penutupan
+8. exit_price/pnl/rr_realized/exit_reason terisi→ Trade lengkap → masuk Analytics
+Diagram 2a — Siklus hidup satu trade. Lihat Bab 07.4 untuk detail teknis deteksi posisi baru, dan Bab 05.13 untuk Notification Service.
+Alur Arsitektur Keseluruhan (Closed-Loop)
+Binance API+ Quick-Tag Web→ Data Collector (merge objektif + subjektif)
+Data Collector→ MySQL (source of truth)→ Analytics Engine
+Analytics Engine→ Edge Discovery & Validation→ Dashboard + AI Coach
+Dashboard + AI Coach→ Trader (keputusan entry)→ (kembali ke Data Collector)
+Diagram 2b — Alur data closed-loop dari capture sampai kembali memengaruhi keputusan trader
+7
+--- Page 8 ---
+05
+Daftar Fitur Lengkap per Modul
+5.1 Trade Collection Module
+Merge otomatis data objektif (fill Binance: entry & exit) dengan data subjektif (Quick-Tag) berdasarkan kedekatan waktu & symbol
+Deteksi & pencegahan duplikat trade via unique constraint (symbol, binance_trade_id) pada exchange_fills
+Kalkulasi otomatis: holding time, RR realized, PnL bersih setelah fee & funding
+Status linking: trade manual yang belum ter-link ke fill Binance ditandai "pending sync"
+5.2 Quick-Tag Capture (Web) DIREVISI — v1.4
+Form tap-based: setup (multi-checkbox), bias arah (dropdown, disimpan sebagai bias_arah_manual), sesi (auto-detect dari waktu, bisa
+dikoreksi), confidence slider, kondisi psikologis, toggle kepatuhan plan
+Order type (Limit/Market, disimpan ke trade_execution.order_type) — satu-satunya field trade_execution yang diisi manual; 
+moved_to_breakeven/trailing_stop_used/exit_reason terisi otomatis belakangan oleh Binance Sync Service
+Upload screenshot "before entry" (opsional, ke screenshots stage=before_entry) — satu-satunya stage yang relevan diupload di
+titik ini; stage during_trade dan exit baru relevan belakangan, ditambahkan lewat Trade Detail (Bab 05.10)
+Catatan bebas (opsional, ke psychology.free_notes) — kolom teks singkat, tidak diproses Analytics Engine (Bab 08 Dokumen
+Perencanaan), murni jejak konteks untuk dibaca ulang saat review
+Target waktu pengisian < 15 detik untuk field wajib (setup, bias arah, confidence, psikologi, plan) — screenshot & catatan bebas boleh
+dilewati tanpa memperlambat alur, sesuai prinsip Bab 08 Dokumen Perencanaan (opsional, tidak memengaruhi kualitas analitik inti jika
+terlewat)
+Full web app responsive (bukan PWA/mobile-only) — bisa diakses dari browser desktop maupun HP tanpa instalasi. Offline-first &
+IndexedDB dihapus dari desain karena diasumsikan selalu ada koneksi ke server; menyederhanakan pengembangan & testing di local
+Trade dengan status pending_tag ditampilkan sebagai badge/counter di navbar begitu terdeteksi oleh Binance Sync Service (Bab 07.4)
+Window koreksi 60 detik sebelum data dikunci permanen (locked_at pada trade induk, dengan trigger cascade ke tabel terkait — lihat
+Bab 09)
+Notifikasi visual saat data berhasil terkunci (immutable)
+5.3 Market Context Collector DIREVISI — v1.2
+Ambil ATR, volume, funding rate, open interest dari Binance Futures API (publik, tanpa key)
+Ambil Fear & Greed Index dari Alternative.me API
+Ambil BTC Dominance dari CoinGecko /global endpoint
+Hitung otomatistrend_htf/trend_ltf menggunakan aturan objektif berbasis EMA50 saja (bukan EMA50 vs EMA200): trend "bull"
+bila harga penutupan di atas EMA50 dan EMA50 sedang naik dalam beberapa candle terakhir, "bear" bila sebaliknya, "range" bila harga
+berosilasi di sekitar EMA50 tanpa slope jelas. Timeframe: HTF = 4 Jam, LTF = 1 Jam, sesuai gaya analisis Anda
+Snapshot otomatis kondisi market pada timestamp entry trade tercatat
+Sinkronisasi berkala (per jam) untuk data pasif, event-driven untuk data terkait entry
+5.4 Binance Sync Service
+Sinkronisasi read-only: user trades, position risk, income history
+Strategi incremental sync berbasis lastSyncTimestamp — tidak re-fetch histori penuh setiap kali
+Event-driven trigger: begitu Quick-Tag disimpan, sync fill terbaru untuk pair terkait, lalu di-link sebagai baris trade_fills dengan role
+entry/exit yang sesuai
+Retry otomatis dengan exponential backoff bila Binance API rate-limited atau timeout
+Alert bila sync gagal berturut-turut > 3 kali — dikirim lewat Notification Service (Bab 05.13), bukan lagi Telegram-only
+5.5 Analytics Engine DIREVISI — v1.3
+Kalkulasi metrik: Win Rate, Average RR, Expectancy, Profit Factor, Max Drawdown, MFE/MAE, Recovery Factor, Avg Holding Time
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+8
+--- Page 9 ---
+Seluruh metrik dapat difilter per dimensi coverage: kondisi market, sesi, rentang volatilitas, pair
+Filter tambahan "Semua Trade" vs "Trade Bertag Saja" — penting begitu Historical Import (Bab 07.5) aktif, supaya trade lama tanpa
+konteks tidak diam-diam mencampuri metrik headline
+Metrik deskriptif baru (v1.3): Return on Margin (PnL ÷ margin trade), Dampak terhadap Equity (PnL ÷ saldo akun saat entry) — dihitung
+on-the-fly dari kolom yang sudah ada (pnl, margin) dan snapshot equity_snapshots (Bab 06.10). Metrik ini murni informatif, tidak
+memengaruhi kalkulasi Edge Discovery — lihat 5.6
+Precision numerik penuh menggunakan Decimal Python (bukan float) untuk menghindari rounding error akumulatif
+5.6 Edge Discovery Engine
+Pencarian kombinasi setup + kondisi market dengan expectancy terbaik
+Ambang minimum sampel bertingkat (n≥20 tampil indikatif, n≥30 naik status Validation)
+Bootstrap resampling untuk confidence interval expectancy (10.000 iterasi)
+Wilson Score Interval untuk win rate
+Koreksi multiple comparisons dengan Benjamini-Hochberg FDR (target FDR 5–10%)
+Split data kronologis untuk validasi out-of-sample (70% discovery / 30% validasi)
+Hanya memakai trade bertag lengkap (data_source ≠ historical_import) dan hanya dihitung dalam satuan R — metrik berbasis
+margin/equity (5.5) sengaja tidak pernah masuk ke sini, supaya kualitas setup tidak tercampur keputusan sizing/leverage. Lihat Bab 08
+untuk penjelasan lengkap alasannya
+5.7 Edge Validation Engine & Status Monitor
+Uji tiga kriteria: stabil (expectancy antar periode konsisten), berulang (lintas pair/bulan/sesi), robust (tahan perubahan parameter kecil)
+Transisi status otomatis: Learning → Research → Validation → Production → Monitoring — aturan lengkap & contoh perhitungan di Bab 08
+Peringatan dini bila expectancy edge Production menurun signifikan dari histori (indikasi regime market berubah) — lihat Bab 08
+5.8 AI Coach
+Evaluasi kontekstual pasca-trade dibanding histori setup serupa
+Hanya menerima data teragregasi & anonim (tanpa harga/identitas akun mentah) sebelum dikirim ke LLM eksternal
+Opsi self-hosted LLM lokal untuk yang tidak ingin data keluar sistem sama sekali
+5.9 Dashboard
+Equity curve, Edge Blueprint table, breakdown metrik per dimensi coverage
+Tampilan status kematangan tiap edge (Learning/Research/Validation/Production/Monitoring)
+Review mingguan: galeri screenshot + catatan bebas per trade
+5.10 Screenshot Manager DIREVISI — v1.4
+Upload before-entry / during-trade / exit ke MinIO object storage (bukan blob database)
+Titik upload berbeda per stage:before_entry diupload saat Quick-Tag (Bab 05.2, mockup 13.1); during_trade dan exit diupload
+belakangan lewat tombol upload di Trade Detail (mockup 13.3), karena momennya memang terjadi setelah entry
+Kompresi otomatis & batas ukuran file
+Retensi dapat dikonfigurasi (default: simpan permanen, opsional auto-archive setelah 1 tahun)
+5.11 Auth & Secret Management
+Login single-user dengan password hashed (argon2) + 2FA (TOTP)
+API key Binance dienkripsi (AES-256) di database, key enkripsi disimpan terpisah di environment variable server
+IP whitelist API key dikonfigurasi di sisi Binance (di luar sistem, sebagai lapisan proteksi tambahan)
+5.12 Backup & Export
+Automated daily backup MySQL (mysqldump) ke 2 lokasi (server + cloud storage terpisah)
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+9
+--- Page 10 ---
+Weekly export seluruh tabel ke CSV/JSON portable
+Retention: 30 hari backup harian, backup mingguan disimpan permanen
+5.13 Notification Service BARU — v1.2
+Menggantikan Telegram bot — mengirim ke tiga channel sekaligus setiap kali alert terpicu: banner in-app, Web Push Notification
+(browser, tidak perlu install app), dan email
+Dua jenis alert yang ditangani: (a) trade baru terdeteksi & menunggu Quick-Tag, (b) status edge turun/naik terutama saat turun ke
+Monitoring
+Web Push memakai VAPID keys standar (Service Worker minimal hanya untuk push, bukan offline-first penuh)
+Email lewat SMTP sederhana (mis. layanan seperti Mailgun/SES, atau SMTP relay biasa untuk kebutuhan personal)
+Setiap alert dicatat di tabel system_notifications (Bab 06.9) untuk audit & debugging saat testing di local
+5.14 Historical Import Service BARU — v1.3
+Fitur sekali-jalan (bisa diulang manual) untuk menarik riwayat trade closed dari Binance sebelum TEIS pertama kali dijalankan
+Pagination berbasis rentang waktu (loop mundur per beberapa bulan) memakai userTrades dan income — lihat detail teknis di Bab 07.5
+Hanya mengisi data objektif: trades (data_source=historical_import), exchange_fills, trade_fills. Kolom psychology, 
+trade_setup_tags, market_context.bias_arah_manual sengaja dibiarkan kosong — tidak direkonstruksi untuk mencegah
+hindsight bias
+Progress bar & ringkasan hasil (jumlah trade berhasil diimpor, rentang tanggal) ditampilkan di UI (mockup 13.9)
+Trade hasil import otomatis dikecualikan dari Edge Discovery Engine (Bab 05.6) dan diberi label visual berbeda di Journal (Bab 13.2)
+5.15 Equity Snapshot Service BARU — v1.3
+Mengambil saldo akun real dari Binance (GET /fapi/v2/balance) secara berkala (mis. tiap jam) via Celery Beat, disimpan ke 
+equity_snapshots (Bab 06.10)
+Mendeteksi deposit/withdrawal lewat income dengan incomeType=TRANSFER, disimpan terpisah ke account_transfers (Bab 06.10)
+supaya tidak salah dibaca sebagai hasil trading saat equity curve dirender
+Equity curve di Dashboard (Bab 13.4) menampilkan dua garis berdampingan: R-kumulatif (murni kualitas keputusan trading) dan saldo real
+(pertumbuhan akun sungguhan, termasuk semua faktor luar)
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+10
+--- Page 11 ---
+06
+Skema Database (MySQL 8)
+Seluruh tabel menggunakan engine InnoDB dan charset utf8mb4. Nilai finansial memakai DECIMAL(20,8) (bukan FLOAT/DOUBLE) untuk
+presisi penuh. Identifier memakai  CHAR(36) (UUID string, digenerate di sisi aplikasi Python dengan  uuid4()) agar portable dan tidak
+bergantung fungsi UUID() MySQL yang non-deterministik.
+PERUBAHAN DI V1.1
+Kolom exchange_fill_id dihapus dari tabel trades (digantikan tabel trade_fills). Tabel baru: trade_fills, 
+trade_execution. Kolom baru: market_context.bias_arah_manual. Trigger immutability diperluas ke psychology dan 
+trade_setup_tags.
+6.1 Tabel trades
+CREATE TABLE trades (
+  id CHAR(36) PRIMARY KEY,
+  pair VARCHAR(20) NOT NULL,
+  direction ENUM('long','short') NOT NULL,
+  entry_price DECIMAL(20,8) NOT NULL,
+  exit_price DECIMAL(20,8) NULL,
+  stop_loss DECIMAL(20,8) NULL,
+  take_profit DECIMAL(20,8) NULL,
+  margin DECIMAL(20,8) NULL,
+  leverage DECIMAL(6,2) NULL,
+  risk_amount DECIMAL(20,8) NULL,
+  rr_planned DECIMAL(6,2) NULL,
+  rr_realized DECIMAL(6,2) NULL,
+  pnl DECIMAL(20,8) NULL,
+  fee DECIMAL(20,8) NULL,
+  entry_time DATETIME(3) NOT NULL,
+  exit_time DATETIME(3) NULL,
+  holding_time_sec INT GENERATED ALWAYS AS
+    (TIMESTAMPDIFF(SECOND, entry_time, exit_time)) STORED,
+  data_source ENUM('manual','binance_sync','historical_import') NOT NULL,
+  locked_at DATETIME(3) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  INDEX idx_trades_pair_time (pair, entry_time),
+  INDEX idx_trades_locked (locked_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+Catatan: kolom  exchange_fill_id pada versi sebelumnya dihapus dari tabel ini — relasi ke fill kini lewat tabel  trade_fills (6.3). Kolom  rr_realized
+ditambahkan sebagai snapshot tersimpan (bukan dihitung ulang tiap query), supaya nilai historis tidak berubah kalau logic kalkulasi berubah di masa depan.
+6.2 Tabel exchange_fills
+CREATE TABLE exchange_fills (
+  id CHAR(36) PRIMARY KEY,
+  symbol VARCHAR(20) NOT NULL,
+  binance_trade_id BIGINT NOT NULL,
+  binance_order_id BIGINT NOT NULL,
+  price DECIMAL(20,8) NOT NULL,
+  qty DECIMAL(20,8) NOT NULL,
+  fee DECIMAL(20,8) NOT NULL,
+  funding_fee DECIMAL(20,8) NULL,
+  side VARCHAR(10) NOT NULL,
+  executed_at DATETIME(3) NOT NULL,
+  raw_payload JSON NULL,
+  UNIQUE KEY uq_fill (symbol, binance_trade_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+11
+--- Page 12 ---
+6.3 Tabel trade_fills BARU — v1.1
+CREATE TABLE trade_fills (
+  id CHAR(36) PRIMARY KEY,
+  trade_id CHAR(36) NOT NULL,
+  exchange_fill_id CHAR(36) NOT NULL,
+  role ENUM('entry','exit') NOT NULL,
+  CONSTRAINT fk_tf_trade FOREIGN KEY (trade_id) REFERENCES trades(id),
+  CONSTRAINT fk_tf_fill FOREIGN KEY (exchange_fill_id)
+    REFERENCES exchange_fills(id),
+  UNIQUE KEY uq_trade_fill (trade_id, exchange_fill_id),
+  INDEX idx_tf_trade_role (trade_id, role)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+Menggantikan kolom exchange_fill_id tunggal di trades. Karena Anda tidak memakai partial TP atau scale in/out, satu trade normalnya memiliki tepat dua baris
+di sini (satu entry, satu exit) — bukan desain generik untuk N-fill yang tidak pernah dipakai, tapi tetap relasional yang benar karena entry dan exit memang dua fill
+terpisah dari Binance.
+6.4 Tabel trade_execution BARU — v1.1
+CREATE TABLE trade_execution (
+  id CHAR(36) PRIMARY KEY,
+  trade_id CHAR(36) NOT NULL UNIQUE,
+  order_type ENUM('limit','market') NOT NULL,
+  moved_to_breakeven BOOLEAN NOT NULL DEFAULT FALSE,
+  trailing_stop_used BOOLEAN NOT NULL DEFAULT FALSE,
+  exit_reason ENUM('take_profit','stop_loss','manual_close','breakeven') NULL,
+  CONSTRAINT fk_exec_trade FOREIGN KEY (trade_id) REFERENCES trades(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+Diisi  lewat  Quick-Tag  saat  entry  (order_type)  dan  diperbarui  otomatis  oleh  Binance  Sync  Service  saat  exit  terdeteksi  (exit_reason,  breakeven,  trailing).  Field
+partial_tp/scale_in/scale_out sengaja tidak dibuat karena tidak dipakai — kolom yang tidak pernah diisi hanya menambah kompleksitas tanpa nilai.
+6.5 Tabel market_context
+CREATE TABLE market_context (
+  id CHAR(36) PRIMARY KEY,
+  trade_id CHAR(36) NOT NULL,
+  trend_htf VARCHAR(20) NULL,        -- otomatis, aturan EMA
+  trend_ltf VARCHAR(20) NULL,        -- otomatis, aturan EMA
+  bias_arah_manual ENUM('bull_trend','bear_trend','range') NULL, -- BARU: subjektif, dari Quick-Tag
+  atr DECIMAL(20,8) NULL,
+  volume_24h DECIMAL(24,4) NULL,
+  session ENUM('asia','london','new_york') NOT NULL,
+  btc_dominance DECIMAL(6,2) NULL,
+  fear_greed_index TINYINT UNSIGNED NULL,
+  funding_rate DECIMAL(10,6) NULL,
+  open_interest DECIMAL(24,4) NULL,
+  captured_at DATETIME(3) NOT NULL,
+  CONSTRAINT fk_mc_trade FOREIGN KEY (trade_id) REFERENCES trades(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+trend_htf/trend_ltf dan bias_arah_manual sengaja dipisah: dua kolom pertama murni hasil hitungan Market Context Collector (objektif), kolom terakhir murni
+pembacaan subjektif Anda saat entry. Selisih keduanya bisa jadi dimensi analitik tersendiri di masa depan — misalnya "seberapa sering bias subjektif Anda berbeda
+dari tren objektif, dan apakah itu memengaruhi hasil trade".
+6.6 Tabel Taksonomi & Tag Setup
+CREATE TABLE setup_taxonomy_versions (
+  id CHAR(36) PRIMARY KEY,
+  version_number INT NOT NULL,
+  tag_name VARCHAR(50) NOT NULL,
+  tag_definition TEXT NOT NULL,
+12
+--- Page 13 ---
+  effective_from DATETIME(3) NOT NULL,
+  effective_until DATETIME(3) NULL,
+  UNIQUE KEY uq_version_tag (version_number, tag_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE trade_setup_tags (
+  trade_id CHAR(36) NOT NULL,
+  taxonomy_version_id CHAR(36) NOT NULL,
+  PRIMARY KEY (trade_id, taxonomy_version_id),
+  CONSTRAINT fk_tst_trade FOREIGN KEY (trade_id) REFERENCES trades(id),
+  CONSTRAINT fk_tst_tax FOREIGN KEY (taxonomy_version_id)
+    REFERENCES setup_taxonomy_versions(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+6.7 Tabel psychology
+CREATE TABLE psychology (
+  id CHAR(36) PRIMARY KEY,
+  trade_id CHAR(36) NOT NULL UNIQUE,
+  confidence_level TINYINT NOT NULL,
+  psychological_tags JSON NOT NULL, -- contoh: ["fomo","revenge_trade"]
+  plan_adherence BOOLEAN NOT NULL,
+  free_notes TEXT NULL,
+  CONSTRAINT fk_psy_trade FOREIGN KEY (trade_id) REFERENCES trades(id),
+  CONSTRAINT chk_confidence CHECK (confidence_level BETWEEN 1 AND 10)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+Tidak punya kolom locked_at sendiri — status kunci mengikuti trades.locked_at milik trade induk lewat trigger, lihat Bab 09.
+6.8 Tabel Pendukung Lain
+CREATE TABLE screenshots (
+  id CHAR(36) PRIMARY KEY,
+  trade_id CHAR(36) NOT NULL,
+  stage ENUM('before_entry','during_trade','exit') NOT NULL,
+  file_path VARCHAR(500) NOT NULL, -- path objek di MinIO
+  uploaded_at DATETIME(3) NOT NULL,
+  CONSTRAINT fk_ss_trade FOREIGN KEY (trade_id) REFERENCES trades(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE trade_corrections (
+  id CHAR(36) PRIMARY KEY,
+  original_trade_id CHAR(36) NOT NULL,
+  field_name VARCHAR(50) NOT NULL,
+  old_value VARCHAR(255) NULL,
+  new_value VARCHAR(255) NULL,
+  reason TEXT NOT NULL,
+  corrected_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_corr_trade FOREIGN KEY (original_trade_id) REFERENCES trades(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE edge_blueprints (
+  id CHAR(36) PRIMARY KEY,
+  name VARCHAR(100) NOT NULL,
+  setup_combination JSON NOT NULL,
+  sample_size INT NOT NULL,
+  expectancy_r DECIMAL(8,4) NOT NULL,
+  ci_lower DECIMAL(8,4) NOT NULL,
+  ci_upper DECIMAL(8,4) NOT NULL,
+  status ENUM('learning','research','validation','production','monitoring')
+    NOT NULL DEFAULT 'learning',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+    ON UPDATE CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+13
+--- Page 14 ---
+6.9 Tabel system_notifications BARU — v1.2
+CREATE TABLE system_notifications (
+  id CHAR(36) PRIMARY KEY,
+  type ENUM('trade_pending_tag','edge_status_change','sync_failure') NOT NULL,
+  reference_id CHAR(36) NULL, -- trade_id atau edge_blueprint_id terkait
+  channel ENUM('in_app','web_push','email') NOT NULL,
+  message TEXT NOT NULL,
+  sent_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  acknowledged_at DATETIME(3) NULL,
+  INDEX idx_notif_type_sent (type, sent_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+Satu baris per channel per alert (jadi satu kejadian bisa menghasilkan 3 baris jika dikirim ke ketiganya) — memudahkan audit "channel mana yang berhasil terkirim"
+saat debugging di local.
+6.10 Tabel equity_snapshots & account_transfers BARU — v1.3
+CREATE TABLE equity_snapshots (
+  id CHAR(36) PRIMARY KEY,
+  balance DECIMAL(20,8) NOT NULL,
+  unrealized_pnl DECIMAL(20,8) NOT NULL,
+  captured_at DATETIME(3) NOT NULL,
+  INDEX idx_equity_time (captured_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE account_transfers (
+  id CHAR(36) PRIMARY KEY,
+  amount DECIMAL(20,8) NOT NULL, -- positif = deposit, negatif = withdrawal
+  asset VARCHAR(10) NOT NULL,
+  occurred_at DATETIME(3) NOT NULL,
+  binance_transfer_ref VARCHAR(100) NULL,
+  INDEX idx_transfer_time (occurred_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+equity_snapshots diisi Equity Snapshot Service (Bab 05.15, Bab 07.6) tiap jam. account_transfers diisi dari income dengan incomeType=TRANSFER —
+dipakai Dashboard (Bab 13.4) untuk menandai titik di kurva saldo real sebagai "deposit/withdrawal", bukan hasil trading, supaya tidak salah tafsir sebagai lonjakan
+profit/loss.
+Catatan trigger immutability (MySQL): MySQL tidak mendukung  CHECK yang mereferensikan tabel lain dalam trigger langsung dari DDL
+sederhana, jadi penguncian  locked_at diimplementasikan lewat  BEFORE UPDATE TRIGGER di level database sebagai lapisan kedua
+(setelah  validasi  di  level  aplikasi  FastAPI),  yang  menolak  perubahan  kolom  selain  exit_price,  exit_time,  pnl,  rr_realized jika
+locked_at IS NOT NULL. Trigger serupa kini juga dipasang di psychology dan trade_setup_tags — lihat Bab 09 untuk detail alurnya.
+14
+--- Page 15 ---
+07
+Integrasi Binance API
+7.1 Permission API Key
+Permission Status Alasan
+Enable Reading ✅ Aktif
+ Wajib untuk baca trade history & posisi
+Enable Spot & Margin Trading ❌ Nonaktif
+ Tidak diperlukan, mengurangi permukaan risiko
+Enable Futures Trading ❌ Nonaktif
+ TEIS tidak melakukan eksekusi order apapun
+Enable Withdrawals ❌ TIDAK
+BOLEH AKTIF
+Mitigasi risiko finansial paling kritis
+Tambahan: aktifkan IP Whitelist di pengaturan API key Binance, dibatasi hanya ke IP publik VPS TEIS.
+7.2 Endpoint yang Dipakai
+Kebutuhan Endpoint Auth
+Riwayat trade GET /fapi/v1/userTrades Signed
+Posisi & PnL GET /fapi/v2/positionRisk Signed
+Riwayat income (funding, fee) GET /fapi/v1/income Signed
+Funding rate historis GET /fapi/v1/fundingRate Publik
+Open interest GET /futures/data/openInterestHistPublik
+Candle (ATR, volume, EMA) GET /fapi/v1/klines Publik
+Fear & Greed Index GET alternative.me/fng/ Publik, non-Binance
+BTC Dominance GET coingecko.com/api/v3/global Publik, non-Binance
+7.3 Strategi Sync
+Event-driven: Quick-Tag tersimpan → trigger Celery task untuk fetch fill terbaru pair terkait, di-link ke trade_fills dengan role sesuai
+Scheduled: Celery Beat setiap 1 jam untuk funding rate, open interest, Fear&Greed, BTC dominance
+Incremental: gunakan kolom lastSyncTimestamp per jenis data agar tidak re-fetch histori penuh
+Rate limit awareness: hormati weight-based limit Binance (±2400 weight/menit), gunakan client Python python-binance atau ccxt yang
+sudah menangani header rate-limit
+REKOMENDASI TAMBAHAN
+Kembangkan & uji Binance Sync Service terlebih dulu di Futures Testnet sebelum dihubungkan ke read-only key akun asli, supaya
+kesalahan sinkronisasi tidak berisiko terhadap data akun sungguhan di fase awal pengembangan.
+7.4 Deteksi Trade Baru (Polling Posisi) BARU — v1.2
+Bagian  ini  menjawab  pertanyaan  mendasar:  bagaimana  TEIS  tahu  Anda  baru  saja  entry?  Jawabannya:  tidak  instan —  TEIS  tidak
+"mendengarkan" event dari Binance, melainkan mengecek berkala (polling).
+Celery Beat menjalankan task poll_open_positions setiap 30–60 detik memanggil GET /fapi/v2/positionRisk
+• 
+• 
+• 
+• 
+1. 
+15
+--- Page 16 ---
+Hasilnya dibandingkan dengan posisi yang sudah tercatat di tabel trades (yang exit_time IS NULL) — posisi yang belum ada berarti
+baru
+Untuk posisi baru: buat baris trades (data_source=binance_sync, status implisit "pending_tag" karena psychology/
+trade_setup_tags masih kosong), cari fill pembukaannya lewat userTrades untuk diisi ke trade_fills role entry, dan cek GET /
+fapi/v1/openOrders untuk mendeteksi order SL/TP yang terpasang (diisi ke trades.stop_loss/take_profit)
+Notification Service (Bab 05.13) dipicu: kirim ke banner in-app + Web Push + email bahwa ada trade baru menunggu Quick-Tag
+Task yang sama juga mendeteksi penutupan posisi: kalau posisi yang sebelumnya tercatat kini tidak lagi muncul di positionRisk,
+sistem fetch fill penutupan terbaru dari userTrades, isi trade_fills role exit, hitung exit_price/pnl/rr_realized, dan simpulkan
+exit_reason dari tipe order fill penutupan (STOP_MARKET → stop_loss, TAKE_PROFIT_MARKET → take_profit, selainnya →
+manual_close)
+IMPLIKASI PRAKTIS
+Ada jeda antara Anda entry/close di Binance dan sistem mendeteksinya — maksimal seinterval polling (30–60 detik). Ini bukan sistem
+real-time streaming (yang butuh WebSocket user-data-stream Binance, kompleksitas ekstra yang tidak dibutuhkan untuk kebutuhan
+journaling personal), tapi cukup cepat untuk tujuan pencatatan.
+7.5 Historical Import BARU — v1.3
+Menjawab pertanyaan: apakah riwayat trade lama di Binance ikut masuk? Dengan fitur ini, ya — tapi hanya bagian objektifnya.
+Dipicu manual sekali oleh Anda (tombol "Import Riwayat" di UI), bukan berjalan otomatis di background terus-menerus
+income dan userTrades Binance membatasi rentang waktu per panggilan (bukan sekali tarik semua) — task melakukan loop mundur
+per beberapa bulan dari sekarang sampai ke titik akun dibuat atau sampai tidak ada data lagi
+Setiap fill yang ditemukan diproses lewat jalur yang sama seperti sync biasa: masuk exchange_fills, dipasangkan jadi trades
+(data_source=historical_import) dan trade_fills (role entry/exit)
+psychology, trade_setup_tags, bias_arah_manual sengaja dibiarkan kosong — tidak diisi ulang secara retroaktif
+Deduplikasi otomatis lewat UNIQUE KEY uq_fill (symbol, binance_trade_id) di exchange_fills — aman dijalankan berkali-
+kali tanpa data dobel, termasuk kalau tumpang tindih dengan trade yang sudah masuk lewat polling live (Bab 07.4)
+7.6 Equity Snapshot Polling BARU — v1.3
+Celery Beat menjalankan task setiap jam memanggil GET /fapi/v2/balance, menyimpan ke equity_snapshots
+Task terpisah mengambil income dengan incomeType=TRANSFER secara berkala, menyimpan ke account_transfers
+Saat Historical Import (7.5) dijalankan, saldo historis tidak direkonstruksi mundur secara otomatis (secara teknis bisa didekati dari saldo
+sekarang dikurangi seluruh income terbalik, tapi rawan salah kalau ada kategori income yang terlewat) — snapshot baru mulai tercatat
+akurat sejak Equity Snapshot Service pertama kali berjalan
+2. 
+3. 
+4. 
+5. 
+1. 
+2. 
+3. 
+4. 
+5. 
+• 
+• 
+• 
+16
+--- Page 17 ---
+08
+Edge Discovery Engine — Ambang Statistik & Alur Validasi
+Status Syarat Minimum Sampel Metode Statistik
+Research (tampil indikatif)n ≥ 20 per kombinasi Deskriptif dasar saja, ditandai "belum signifikan"
+Validation n ≥ 30 per kombinasi Bootstrap CI 95% (10.000 resample) + Wilson Score Interval
+Production n ≥ 50–100 (tergantung variance) Lolos 3 kriteria: stabil, berulang, robust + FDR correction
+KENAPA TETAP MURNI SATUAN R (V1.3)
+Edge Discovery Engine sengaja tidak memakai Return on Margin atau metrik berbasis equity (Bab 05.5) sebagai bahan statistik, dan 
+tidak menyertakan trade hasil Historical Import (data_source=historical_import) karena tidak punya tag setup. Alasannya:
+expectancy dalam R mengukur murni kualitas keputusan setup, terlepas dari leverage/sizing yang dipakai saat itu. Kalau metrik berbasis
+margin ikut campur, dua trade dengan setup identik tapi leverage berbeda akan terlihat punya "kualitas" berbeda — padahal bedanya
+cuma di sizing, bukan di setup-nya. Metrik margin/equity tetap berguna, tapi sebagai informasi deskriptif terpisah di Dashboard & Trade
+Detail, bukan bahan Edge Discovery.
+8.1 Bagaimana Kombinasi Tag Dibentuk
+Sistem tidak mencoba seluruh kombinasi teoretis dari semua tag yang ada (jumlahnya akan meledak secara kombinatorial). Sebagai gantinya,
+job batch (Bab 8.4) hanya mengevaluasi kombinasi tag yang benar-benar pernah muncul bersamaan di trade Anda:
+Kelompokkan seluruh trade closed berdasarkan set tag setup yang sama-sama dipakai (dibatasi maksimal 4 tag sekaligus per kombinasi,
+supaya tidak terlalu granular dan sampelnya tidak terlalu tersebar)
+Hitung jumlah trade (n) di tiap kelompok kombinasi
+Kombinasi dengan n < 20 tidak dievaluasi lebih lanjut (terlalu sedikit untuk statistik apapun)
+8.2 Metode Statistik yang Dipakai
+Metode Cara Kerja
+Bootstrap CI 95% (expectancy)Dari n trade di satu kombinasi, ambil ulang sampel acak dengan pengembalian sebanyak 10.000 kali, hitung
+rata-rata R-multiple tiap resample, ambil persentil ke-2.5 dan ke-97.5 dari 10.000 hasil sebagai batas bawah/
+atas interval kepercayaan
+Wilson Score Interval (win rate)Interval kepercayaan proporsi yang lebih akurat dibanding pendekatan normal biasa, terutama saat n masih
+kecil — mencegah win rate 70% dari 20 trade diperlakukan seyakin 70% dari 200 trade
+FDR Correction (Benjamini-
+Hochberg)
+Karena banyak kombinasi diuji sekaligus, sebagian akan "terlihat" signifikan murni karena kebetulan (multiple
+comparisons). Urutkan seluruh p-value dari semua kombinasi, terapkan ambang batas yang makin ketat
+secara proporsional — hanya kombinasi yang lolos ambang ini dianggap signifikan sungguhan
+Out-of-sample split 70/30 Data diurutkan kronologis, 70% pertama dipakai untuk "menemukan" pola, 30% sisanya (data yang belum
+pernah dilihat proses discovery) dipakai untuk memverifikasi pola itu masih berlaku — mencegah overfitting
+terhadap histori
+8.3 Diagram Alur Keputusan
+Kombinasi Tag Baru→ n ≥ 20?
+Tidak → Disembunyikan dari dashboard
+1. 
+2. 
+3. 
+17
+--- Page 18 ---
+Ya → Bootstrap CI 95% + Wilson Score→ n ≥ 30?
+Ya → Status → Validation→ FDR Correction (Benjamini-Hochberg)
+FDR Correction→ Out-of-Sample Validation (split 70/30)→ Stabil, berulang, robust?
+Ya → Status → Production
+Tidak → Tetap di Validation
+Diagram 3 — Alur statistik Edge Discovery Engine, kini menampilkan eksplisit gerbang n≥30/status Validation yang sebelumnya tidak muncul di diagram.
+CATATAN PENTING
+Ambang sampel di atas adalah syarat validitas statistik per kombinasi tag, bukan target jumlah trade keseluruhan sistem — ini tidak
+bertentangan dengan prinsip Bab 12 Dokumen Perencanaan ("target bukan jumlah trade tetap"). Total trade yang dibutuhkan tetap
+bergantung pada berapa banyak kombinasi yang ingin diuji dan seberapa merata coverage-nya.
+8.4 Kapan Dihitung: Batch vs Real-Time BARU — v1.2
+Jenis Kalkulasi Kapan Dihitung Alasan
+Metrik dashboard sederhana (Win Rate,
+Expectancy, Profit Factor, Max DD, Equity
+Curve, Coverage)
+Real-time, saat halaman
+dibuka
+Query agregasi SQL/pandas biasa — murah secara komputasi
+Edge Discovery (bootstrap CI, FDR
+correction, uji stabil/berulang/robust)
+Job batch terjadwal
+(Celery Beat, harian)
+10.000 resampling per kombinasi terlalu berat untuk dihitung ulang tiap
+kali halaman dibuka; hasil disimpan di edge_blueprints, Dashboard/
+Edge Explorer tinggal membaca
+8.5 Aturan Lengkap Transisi Status (Termasuk Turun Status) BARU — v1.2
+Kondisi Status Baru
+n < 20 Learning
+20 ≤ n < 30 Research (indikatif, "belum signifikan")
+n ≥ 30, tiga kriteria (stabil/berulang/robust)
+belum lolos semua
+Validation
+n ≥ 50–100, tiga kriteria lolos semua +
+signifikan setelah FDR correction
+Production
+Sebelumnya Production, tapi rata-rata 30 trade
+terakhir dari kombinasi ini jatuh di luar/di bawah
+batas bawah CI historisnya
+Turun ke Monitoring + alert terkirim (Bab 05.13)
+Sedang Monitoring, tapi data terbaru kembali
+stabil & masuk CI historis
+Naik lagi ke Production
+Sedang Monitoring, terus memburuk dalam
+periode validasi berikutnya
+Tetap di Monitoring (tidak otomatis dihapus — riwayat tetap tersimpan sebagai data; Anda bisa
+arsipkan manual bila dianggap perlu)
+18
+--- Page 19 ---
+Deteksi "jatuh di luar CI historis" dilakukan job batch yang sama (8.4): tiap edge berstatus Production dibandingkan rata-rata 30 trade
+terakhirnya terhadap  ci_lower/ci_upper yang tersimpan di  edge_blueprints. Kalau rata-rata terbaru berada di bawah  ci_lower, itu
+indikasi statistik bahwa performa bukan sekadar variance normal — kemungkinan karakter market yang mendasari edge itu sudah berubah.
+19
+--- Page 20 ---
+09
+Alur Immutable Data & Koreksi
+Quick-Tag Disimpan→ Window Koreksi 60 Detik
+Edit tag/psikologi diizinkan→ 60 detik terlewati?
+Ya → trades.locked_at diisi→ Trigger cascade ke psychology & trade_setup_tags
+Jika perlu koreksi→ INSERT ke trade_corrections
+Diagram 4 — Alur penguncian data immutable dan mekanisme koreksi terkendali
+Cascade Lock ke Tabel Subjektif BARU — v1.1
+Sebelumnya  hanya  trades.locked_at yang  ada,  sehingga  tidak  jelas  apakah  psychology dan  trade_setup_tags ikut  terkunci.
+Diperbaiki dengan trigger  BEFORE UPDATE/BEFORE DELETE pada kedua tabel tersebut yang mengecek status  locked_at pada baris
+trades terkait (via trade_id):
+-- Ilustrasi logika trigger (bukan sintaks final)
+BEFORE UPDATE ON psychology
+  IF (SELECT locked_at FROM trades WHERE id = NEW.trade_id) IS NOT NULL
+  THEN SIGNAL SQLSTATE '45000'
+       SET MESSAGE_TEXT = 'Trade sudah terkunci, gunakan trade_corrections';
+BEFORE UPDATE/DELETE ON trade_setup_tags
+  IF (SELECT locked_at FROM trades WHERE id = OLD.trade_id) IS NOT NULL
+  THEN SIGNAL SQLSTATE '45000'
+       SET MESSAGE_TEXT = 'Trade sudah terkunci, gunakan trade_corrections';
+Dengan ini, ketiga tabel data subjektif (trades, psychology, trade_setup_tags) konsisten mengikuti satu sumber kebenaran status kunci — trades.locked_at —
+sesuai prinsip immutable snapshot di Bab 01.
+20
+--- Page 21 ---
+10
+Keamanan (Security Design)
+API key Binance: permission read-only saja, dienkripsi AES-256 di database, key enkripsi disimpan di environment variable server (terpisah
+dari database)
+IP Whitelist di sisi Binance dibatasi ke IP VPS TEIS
+HTTPS wajib untuk seluruh akses, termasuk dari Quick-Tag PWA di HP
+Autentikasi aplikasi: login password (argon2 hash) + 2FA TOTP, meski single-user
+Audit log: setiap sync Binance dan setiap entri di trade_corrections dicatat dengan timestamp & sumber
+Secrets management: tidak ada credential di source code / repo; gunakan .env yang di-.gitignore, atau HashiCorp Vault bila ingin
+lebih formal
+11
+Backup & Disaster Recovery
+Jenis Frekuensi Lokasi Retensi
+Full database dump (mysqldump)Harian Server + Cloud storage terpisah (S3-
+compatible)
+30 hari
+Export CSV/JSON portable Mingguan Cloud storage Permanen
+Screenshot (MinIO) Harian (disamakan
+dengan jadwal DB)
+Cloud storage Permanen (dapat diarsipkan setelah 1
+tahun)
+Uji restore (restore drill) Bulanan Environment terpisah —
+Ditambahkan: jadwal uji restore bulanan — backup yang tidak pernah dicoba di-restore adalah risiko tersembunyi yang umum terjadi.
+12
+Non-Functional Requirements
+Aspek Target
+Availability Tidak butuh 99.9% formal; Quick-Tag harus offline-first
+Response time Quick-Tag < 1 detik submit dari sisi UI
+Delay sync Binance Toleransi beberapa menit dapat diterima
+Observability Logging terstruktur (JSON logs) tiap Celery task; alert Telegram bila gagal berturut-turut
+Precision numerik DECIMAL(20,8) di DB, Decimal Python di kode — tidak boleh float untuk nilai finansial
+Testing Unit test wajib untuk Edge Discovery Engine memakai dataset sintetis dengan hasil statistik yang sudah
+diketahui, agar bug kalkulasi tidak diam-diam menghasilkan insight yang salah
+Concurrency safety Session SQLAlchemy per-request/per-task lewat sessionmaker factory (bukan Session global dibagi
+antar task) — pelajaran dari isu serupa pada proyek lain
+• 
+• 
+• 
+• 
+• 
+• 
+21
+--- Page 22 ---
+13
+Mockup UI/UX per Fitur
+Setiap fitur mendapat layar sendiri yang dirancang untuk tugasnya masing-masing — bukan satu dashboard raksasa yang
+memaksa semua informasi berebut tempat. Prinsipnya: layar capture harus secepat mungkin dan minim distraksi, layar analitik
+harus lapang dan bisa di-filter, layar detail harus lengkap tapi terstruktur per bagian sehingga tidak "terpotong" saat butuh info
+spesifik.
+Layar Platform Tugas Tunggalnya
+13.1 Quick-Tag Capture Web (responsive) Rekam setup & psikologi dalam <15 detik saat entry
+13.2 Trade Journal List Web Scan cepat riwayat trade, jadi pintu masuk ke detail
+13.3 Trade Detail Web Tampilkan seluruh konteks satu trade tanpa memotong info
+13.4 Dashboard Overview Web Cek kesehatan trading secara umum (ritual harian/mingguan)
+13.5 Edge Blueprint Explorer Web Bandingkan seluruh edge yang ditemukan sistem
+13.6 Edge Detail Web Bedah satu edge secara statistik sebelum dipercaya
+13.7 Weekly Review Web Ritual review mingguan — screenshot & catatan
+13.8 Status Monitor Alert In-App + Web Push +
+Email
+Peringatan proaktif saat edge mulai melemah
+13.9 Historical Import Wizard Web Tarik riwayat trade lama sekali di awal, tanpa mencampuri metrik utama
+22
+--- Page 23 ---
+13.1 Quick-Tag Capture (Web) DIREVISI — v1.4
+Tugas tunggal: isi dalam <15 detik untuk field wajib, satu layar tanpa scroll berlebihan, seluruhnya tap — tidak ada keyboard kecuali catatan
+opsional. Kini lengkap dengan tiga field yang sebelumnya luput: order type, upload screenshot before-entry, dan catatan bebas — semuanya
+opsional/cepat, tidak memperlambat field wajib.
+teis.local/journal/tag/8f2c...
+Journal 1
+Dashboard
+Edge Blueprint
+Review
+⚠ Trade baru terdeteksi 2 menit lalu — isi Quick-Tag sebelum lupa konteksnya
+BTCUSDT LONG Entry 61,240.5 · 14:32 WIB · terisi otomatis dari Binance
+SETUP
+Liquidity Sweep Order Block FVG
+CHOCH Equal High
+BIAS ARAH
+SESI (AUTO-DETECT)
+London ✎
+ORDER TYPE
+CONFIDENCE
+7 / 10
+KONDISI PSIKOLOGIS
+Sesuai Plan FOMO Revenge
+Lelah
+KEPATUHAN PLAN
+SCREENSHOT BEFORE-ENTRY (OPSIONAL)
+⬆ Klik atau drag file di sini
+CATATAN BEBAS (OPSIONAL)
+Tulis konteks tambahan di sini...
+Simpan · Bisa diedit 60 detik
+Bull Bear Range
+Limit Market
+23
+--- Page 24 ---
+13.2 Trade Journal List (Web) DIREVISI — v1.3
+Tugas tunggal: scan cepat, bukan analisis mendalam — analitik ada di layar terpisah (13.4). Tabel padat, filter di atas, klik baris untuk detail.
+Kini ada toggle sumber data supaya trade hasil Historical Import terlihat jelas bedanya.
+13.3 Trade Detail (Web) DIREVISI — v1.4
+Tugas tunggal: tampilkan enam kategori data (Bab 07 Dokumen Perencanaan) tanpa memotong satu sama lain — dipisah per kartu, bukan
+satu blok teks panjang. Diaudit ulang terhadap skema Bab 06: Eksekusi kini menampilkan SL/TP rencana & RR realized, Screenshot jadi
+thumbnail dengan upload untuk during/exit, Psikologi menampilkan catatan bebas, dan Margin & Equity menampilkan leverage.
+teis.local/journal
+Journal
+Dashboard
+Edge Blueprint
+Review
+Trade Bertag + Riwayat Import
+30 Hari Semua Pair Semua Setup Semua Sesi
+Tanggal Pair R Setup Plan 📷
+ Sumber
+14 Jul BTCUSDT L +1.8R Sweep OB ✓ ● Live
+13 Jul ETHUSDT S -1.0R Breakout ✗ ● Live
+12 Jul BTCUSDT L +2.4R Sweep Demand ✓ ● Live
+2 Mar BTCUSDT S -0.6R — tanpa tag — — — Import
+28 Feb ETHUSDT L +1.1R — tanpa tag — — — Import
+teis.local/journal/trade/8f2c...
+Journal
+Dashboard
+Edge Blueprint
+Review
+BTCUSDT · LONG +1.8R 🔒 Locked
+EKSEKUSI
+Entry 61,240.5 · Exit 61,980.0
+SL 60,900.0 · TP 62,000.0
+RR Rencana 1:2.3 · RR Realized 1:2.1
+Order: Limit · Exit: Take Profit
+BE: Tidak · Trailing: Tidak
+MARKET CONTEXT
+Trend HTF: Bull (auto, EMA50 4H)
+Trend LTF: Bull (auto, EMA50 1H)
+Bias Manual: Bull
+Sesi: London · ATR: 412
+Funding: 0.010%
+PSIKOLOGI
+Confidence: 7/10
+Sesuai Plan: Ya · Tag: Tenang
+Catatan: "Entry rapi, tunggu retest OB dulu
+sebelum masuk, sesuai plan minggu ini."
+SCREENSHOT
+Before
+⬆
+During
+⬆
+Exit
+MARGIN & EQUITY (DESKRIPTIF)
+Margin: 250 USDT · Leverage: 10x
+Return on Margin: +21.6%
+Dampak Equity: +0.9%
+AI COACH
+Setup ini mirip 41 trade sebelumnya (WR
+68%, Expectancy +0.9R).
+24
+--- Page 25 ---
+13.4 Dashboard Overview (Web) DIREVISI — v1.3
+Tugas tunggal: cek kesehatan trading dalam <30 detik — ini layar untuk ritual review. Angka headline besar, detail ada di layar lain. Kini ada
+toggle sumber data (supaya trade hasil import tidak diam-diam mencampuri angka), kartu Return on Margin, dan equity curve dua garis.
+13.5 Edge Blueprint Explorer (Web)
+Tugas tunggal: bandingkan semua edge sekaligus, urut berdasarkan expectancy atau status. Klik satu baris untuk masuk ke 13.6.
+teis.local/dashboard
+Journal
+Dashboard
+Edge Blueprint
+Review
+Trade Bertag + Riwayat Import
+EXPECTANCY
++0.74R
+WIN RATE
+58%
+PROFIT FACTOR
+1.9
+MAX DD
+-6.2%
+AVG RETURN ON MARGIN 
+(DESKRIPTIF)
++14.2%
+COVERAGE PER KONDISI MARKET (JUMLAH TRADE)
+Bull 84 Bear 52 Range 19 Volatilitas Tinggi 8
+EQUITY CURVE ● R-kumulatif
+● Saldo Real
+teis.local/edges
+Journal
+Dashboard
+Edge Blueprint
+Review
+Edge Status n Expectancy (CI 95%) Trend
+Trend Continuation A Production 142 +1.01R (0.82–1.19) ↗ stabil
+Range Mean Reversion B Validation 34 +0.72R (0.31–1.10) → diuji
+Breakout Tanpa Konfirmasi Monitoring 96 -0.12R (-0.30–0.05) ↘ menurun
+CHOCH + Demand Asia Research 21 indikatif —
+Equal Low Reversal Learning 7 belum cukup data —
+25
+--- Page 26 ---
+13.6 Edge Detail (Web)
+Tugas tunggal: jawab "apakah edge ini benar-benar layak dipercaya?" — checklist tiga kriteria (Bab 12 Dokumen Perencanaan) ditampilkan
+eksplisit, bukan tersembunyi di angka.
+13.7 Weekly Review (Web)
+Tugas tunggal: ritual review mingguan (poin yang sebelumnya tidak punya "rumah" di dokumen perencanaan) — galeri screenshot + catatan
+bebas, dipisah dari layar analitik supaya reviewnya kualitatif, tidak tercampur angka.
+teis.local/edges/trend-continuation-a
+Journal
+Dashboard
+Edge Blueprint
+Review
+Trend Continuation A Production
+Bull Trend Liquidity Sweep Order Block Demand
+EXPECTANCY (95% CI, N=142)
++1.01R
+0.82R — 1.19R
+KRITERIA VALIDASI
+✅ Stabil (3 periode konsisten)
+✅ Berulang (lintas 4 pair)
+✅ Robust (tahan ubah TP/SL kecil)
+142 TRADE BERKONTRIBUSI
+Klik untuk lihat daftar trade individual →
+teis.local/review/week-28
+Journal
+Dashboard
+Edge Blueprint
+Review
+Minggu 28 · 7–13 Jul 5 trade · +3.1R
+BTCUSDT +1.8R
+"Entry rapi, sesuai plan"
+ETHUSDT -1.0R
+"Terlalu cepat exit"
+BTCUSDT +2.4R
+"Sabar tunggu konfirmasi"
+26
+--- Page 27 ---
+13.8 Notification Service — Tiga Channel DIREVISI — v1.2
+Tugas tunggal: tarik perhatian secepat mungkin, baik untuk trade baru menunggu tag maupun edge yang melemah — dikirim ke tiga channel
+sekaligus (bukan cuma Telegram) supaya peluang terlihat lebih besar, dan semuanya mudah diuji saat development di local.
+1. BANNER IN-APP 2. WEB PUSH NOTIFICATION
+🔔 teis.local
+Edge Status Monitor
+Expectancy turun 0.84R → 0.31R (30 trade terakhir) 
+3. EMAIL
+Subjek: [TEIS] Edge turun status
+Edge "Breakout Tanpa Konfirmasi" turun status: Production →
+Monitoring.
+Expectancy historis 0.84R → 30 trade terakhir 0.31R. Cek
+Edge Detail untuk detail lengkap. 
+Ketiganya dikirim bersamaan oleh Notification Service (Bab 05.13) setiap kali alert terpicu — baik untuk trade pending_tag maupun perubahan status edge. Tiap
+pengiriman dicatat di system_notifications (Bab 06.9) untuk audit.
+13.9 Historical Import Wizard (Web) BARU — v1.3
+Tugas tunggal: tarik riwayat trade lama sekali di awal, dengan peringatan eksplisit soal batasan data supaya Anda tidak salah ekspektasi bahwa
+trade lama akan otomatis ikut Edge Discovery.
+14
+Ringkasan Tech Stack
+Layer Teknologi
+API Backend Python 3.12, FastAPI, Uvicorn/Gunicorn
+Background Job Celery + Redis
+Analytics & Statistik pandas, NumPy, SciPy, statsmodels
+ORM & Migration SQLAlchemy 2.x, Alembic
+⚠ Edge "Breakout Tanpa Konfirmasi" turun ke
+Monitoring
+teis.local/settings/import
+Journal
+Dashboard
+Edge Blueprint
+Review
+Import Riwayat Trade Binance
+⚠ Trade hasil import hanya berisi data eksekusi (entry/exit/PnL). Setup & psikologi tidak diisi ulang, dan trade ini tidak ikut dihitung Edge Discovery.
+RENTANG WAKTU
+1 Jan 2023 — sekarang
+STATUS
+Mengambil data... 4 dari ~12 batch
+HASIL SEMENTARA
+214 trade ditemukan · 214 fill entry + exit dipasangkan · 0 duplikat dilewati
+27
+--- Page 28 ---
+Database MySQL 8.0 (InnoDB, utf8mb4)
+Object Storage MinIO (self-hosted S3-compatible)
+Exchange Client python-binance / ccxt
+Frontend Quick-Tag PWA (React/Vue + Service Worker + IndexedDB)
+Reverse Proxy Nginx + Let's Encrypt (HTTPS)
+Deployment Docker Compose di VPS pribadi
+Notifikasi Telegram Bot API (alert sync gagal)
+15
+Pemetaan ke Roadmap
+Fase (dari Dokumen Perencanaan) Deliverable Teknis
+Fase 1 — Fondasi Pencatatan Skema MySQL (v1.1), Binance Sync (read-only, Testnet dulu), Quick-Tag PWA, Auth & secret
+management, backup harian + restore drill
+Fase 2 — Analitik Dasar Market Context Collector (termasuk kalkulasi trend otomatis), Analytics Engine dengan precision
+Decimal
+Fase 3 — Edge Discovery Bootstrap CI, Wilson Score Interval, FDR correction
+Fase 4 — Edge Validation Out-of-sample split kronologis, uji stabil/berulang/robust
+Fase 5 — Monitoring & AI Coach Status Monitor otomatis, AI Coach dengan data teragregasi/anonim
+Dokumen ini adalah draft teknis revisi v1.1. Empat celah kritis dari audit v1.0 sudah diperbaiki (Bab 02). Poin sedang/minor yang masih terbuka dari audit sebelumnya
+(equity snapshot, penamaan data_source, dsb) dapat dibahas pada revisi berikutnya sebelum Fase 1 dimulai.
+28

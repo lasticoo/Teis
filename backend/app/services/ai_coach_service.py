@@ -217,38 +217,38 @@ class AICoachService:
         mkt = data["market_context"]
 
         return f"""
-Anda adalah Master Institutional SMC (Smart Money Concepts) & Elite Trading Coach dunia yang telah sukses mengubah modal kecil menjadi portofolio besar secara konsisten.
-Anda menguasai analisis Struktur Pasar (BOS, CHOCH, Liquidity Sweeps Asia/London/NY, Premium/Discount Arrays, Order Blocks, Fair Value Gap/FVG, dan SMT Divergence).
-Tugas Anda adalah memberikan ulasan kualitatif pasca-trade (*post-trade review*) yang sangat tajam, profesional, realistis, dan mendalam berdasarkan data anonim berikut.
+Anda adalah Master Institutional SMC (Smart Money Concepts) & ICT Elite Trading Mentor yang telah terbukti sukses menumbuhkan modal kecil menjadi portofolio besar secara konsisten melalui eksekusi presisi tinggi dan disiplin risiko 1R ekuitas.
 
-=== DATA TRADING EKSEKUSI ===
-• Instrumen/Pair: {data['symbol_pair']} (Arah: {data['direction']})
+Evaluasi transaksi berikut dengan memberikan ulasan mentor kualitatif yang sangat tajam, realistis, dan sarat insight SMC institusional:
+
+=== PARAMETER TRANS-EKSEKUSI ===
+• Pair / Instrumen: {data['symbol_pair']} (Arah: {data['direction'].upper()})
 • Hasil Akhir: {data['outcome']} (Realized RR: {data['rr_realized']} R)
-• Durasi Penahanan Posisi: {data['holding_time_minutes']} menit
+• Durasi Posisi: {data['holding_time_minutes']} menit
 • Alasan Exit Posisi: {data['exit_reason']}
-• Setup Tag Komposisi: {', '.join(data['setup_tags']) if data['setup_tags'] else 'Order Block / Liquidity Sweep'}
+• Tag Setup SMC: {', '.join(data['setup_tags']) if data['setup_tags'] else 'Order Block / Liquidity Sweep / FVG'}
 
-=== KONTEKS PASAR INSTITUSIONAL ===
-• Tren HTF (High Timeframe): {mkt['trend_htf']} | Tren LTF (Low Timeframe): {mkt['trend_ltf']} | Sesi Trading: {mkt['session']}
-• Sentimen Pasar (Fear & Greed): {mkt['fear_greed_index']} | BTC Dominance: {mkt['btc_dominance']}%
+=== STRUCTURAL MARKET CONTEXT ===
+• Trend HTF (4H): {mkt['trend_htf']} | Trend LTF (1H): {mkt['trend_ltf']} | Sesi Trading: {mkt['session']}
+• Makro Sentimen: Fear & Greed {mkt['fear_greed_index']} | BTC Dominance {mkt['btc_dominance']}%
 
-=== PSIKOLOGI & EKSEKUSI TRADER ===
-• Level Kepercayaan (1-10): {psych['confidence_level']} / 10
-• Kepatuhan Rencana Trading (Plan Adherence): {'YA (Sangat Disiplin)' if psych['plan_adherence'] else 'TIDAK (Terjadi Deviasi Rencana)'}
-• Tag Bias Emosional: {', '.join(psych['psychological_tags']) if psych['psychological_tags'] else 'Stabil (Tanpa bias emosional)'}
-• Catatan Bebas Trader: "{psych['free_notes']}"
+=== MENTAL STATE & ADHERENCE TRADER ===
+• Confidence Level: {psych['confidence_level']} / 10
+• Plan Adherence: {'YA (Disiplin Sesuai Rencana SMC)' if psych['plan_adherence'] else 'TIDAK (Deviasi Rencana / Impulsif)'}
+• Tag Bias Emosional: {', '.join(psych['psychological_tags']) if psych['psychological_tags'] else 'Tenang & Terkontrol'}
+• Jurnal Bebas Trader: "{psych['free_notes']}"
 
 === STATISTIK HISTORI SETUP SERUPA ===
-• Ukuran Sampel Histori: {hist['sample_size']} trade serupa
+• Sampel Histori Setup Ini: {hist['sample_size']} trade
 • Win Rate Histori Setup Ini: {hist['win_rate_pct']}%
 • Rata-rata RR Histori: {hist['avg_rr']} R
 • Expectancy Histori: {hist['expectancy_r']} R
 
-Berikan ulasan terstruktur dalam format Markdown berbahasa Indonesia yang tegas, motivatif, profesional, dan kaya akan perspektif institusional SMC dengan 4 bagian berikut:
-1. 📌 **Ringkasan Eksekusi & Hasil**
-2. 🧠 **Analisis Psikologi, Adherensi Rencana & Bias Market**
-3. 📊 **Perbandingan statistik Ekspektasi Jangka Panjang vs Variansi Trade**
-4. 💡 **Rekomendasi Aksi Konkret SMC & Manajemen Risiko**
+Tuliskan evaluasi dalam 4 bagian Markdown terstruktur khas Mentor SMC Senior:
+1. 📌 **Analisis Eksekusi SMC & Order Flow Pasar**
+2. 🧠 **Audit Psikologi, Bias Mental & Adherensi Plan**
+3. 📊 **Ekspektasi Matematik Jangka Panjang vs Variansi Acak**
+4. 💡 **Instruksi Kunci Mentor SMC untuk Scaling Modal**
 """.strip()
 
     @classmethod
@@ -256,6 +256,15 @@ Berikan ulasan terstruktur dalam format Markdown berbahasa Indonesia yang tegas,
         """
         Dispatches prompt to configured LLM provider (Groq / OpenRouter / DeepSeek / Together AI / OpenAI / Gemini / Ollama / Fallback Coach Engine).
         """
+        system_prompt = (
+            "Anda adalah Master Institutional Smart Money Concepts (SMC) & ICT Elite Trading Mentor "
+            "berpengalaman 12+ tahun yang terbukti sukses mengubah akun modal kecil menjadi portofolio "
+            "skala besar melalui manajemen risiko 1R ekuitas yang ketat, eksekusi Liquidity Sweeps, "
+            "Order Block (OB) mitigation, FVG Imbalances, Inducement, dan HTF Confluence. "
+            "Berikan analisis dan bimbingan kualitatif yang sangat tajam, bijak, realistis, dan jujur "
+            "layaknya mentor pribadi profesional yang duduk tepat di samping trader."
+        )
+
         # Option 1: Groq Cloud API (Super-fast, Llama 3.3 70B & DeepSeek R1)
         groq_key = getattr(settings, "GROQ_API_KEY", None) or os.environ.get("GROQ_API_KEY")
         if groq_key and len(str(groq_key)) > 5:
@@ -272,11 +281,11 @@ Berikan ulasan terstruktur dalam format Markdown berbahasa Indonesia yang tegas,
                         json={
                             "model": model_id,
                             "messages": [
-                                {"role": "system", "content": "Anda adalah AI Trading Coach senior yang analitis, disiplin, dan objektif."},
+                                {"role": "system", "content": system_prompt},
                                 {"role": "user", "content": prompt_text}
                             ],
                             "temperature": 0.3,
-                            "max_tokens": 1000
+                            "max_tokens": 1200
                         },
                         timeout=12
                     )
@@ -315,11 +324,11 @@ Berikan ulasan terstruktur dalam format Markdown berbahasa Indonesia yang tegas,
                         json={
                             "model": model_id,
                             "messages": [
-                                {"role": "system", "content": "Anda adalah AI Trading Coach senior yang analitis dan disiplin."},
+                                {"role": "system", "content": system_prompt},
                                 {"role": "user", "content": prompt_text}
                             ],
                             "temperature": 0.3,
-                            "max_tokens": 1000
+                            "max_tokens": 1200
                         },
                         timeout=15
                     )
@@ -349,11 +358,11 @@ Berikan ulasan terstruktur dalam format Markdown berbahasa Indonesia yang tegas,
                     json={
                         "model": "deepseek-chat",
                         "messages": [
-                            {"role": "system", "content": "Anda adalah AI Trading Coach senior yang analitis."},
+                            {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt_text}
                         ],
                         "temperature": 0.3,
-                        "max_tokens": 1000
+                        "max_tokens": 1200
                     },
                     timeout=15
                 )
@@ -380,11 +389,11 @@ Berikan ulasan terstruktur dalam format Markdown berbahasa Indonesia yang tegas,
                     json={
                         "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
                         "messages": [
-                            {"role": "system", "content": "Anda adalah AI Trading Coach senior yang analitis."},
+                            {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt_text}
                         ],
                         "temperature": 0.3,
-                        "max_tokens": 1000
+                        "max_tokens": 1200
                     },
                     timeout=15
                 )
@@ -397,7 +406,7 @@ Berikan ulasan terstruktur dalam format Markdown berbahasa Indonesia yang tegas,
             except Exception as e:
                 logger.warning(f"Together AI API call failed: {e}.")
 
-        # Option 1: OpenAI GPT API
+        # Option 5: OpenAI GPT API
         openai_key = getattr(settings, "OPENAI_API_KEY", None)
         if openai_key and len(str(openai_key)) > 5:
             try:
@@ -411,11 +420,11 @@ Berikan ulasan terstruktur dalam format Markdown berbahasa Indonesia yang tegas,
                     json={
                         "model": getattr(settings, "LLM_MODEL", "gpt-4o-mini"),
                         "messages": [
-                            {"role": "system", "content": "Anda adalah AI Trading Coach yang analitis dan disiplin."},
+                            {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt_text}
                         ],
                         "temperature": 0.3,
-                        "max_tokens": 800
+                        "max_tokens": 1000
                     },
                     timeout=15
                 )
@@ -424,7 +433,7 @@ Berikan ulasan terstruktur dalam format Markdown berbahasa Indonesia yang tegas,
             except Exception as e:
                 logger.warning(f"OpenAI API call failed: {e}. Falling back to alternate provider.")
 
-        # Option 2: Ollama Local LLM
+        # Option 6: Ollama Local LLM
         ollama_host = getattr(settings, "OLLAMA_HOST", None)
         if ollama_host:
             try:
@@ -433,7 +442,7 @@ Berikan ulasan terstruktur dalam format Markdown berbahasa Indonesia yang tegas,
                     f"{ollama_host.rstrip('/')}/api/generate",
                     json={
                         "model": getattr(settings, "OLLAMA_MODEL", "llama3"),
-                        "prompt": prompt_text,
+                        "prompt": f"{system_prompt}\n\n{prompt_text}",
                         "stream": False
                     },
                     timeout=20
@@ -443,7 +452,7 @@ Berikan ulasan terstruktur dalam format Markdown berbahasa Indonesia yang tegas,
             except Exception as e:
                 logger.warning(f"Ollama API call failed: {e}. Falling back to Coach Engine.")
 
-        # Option 3: Gemini API / Antigravity
+        # Option 7: Gemini API
         gemini_key = getattr(settings, "GEMINI_API_KEY", None) or os.environ.get("GEMINI_API_KEY")
         if gemini_key and len(str(gemini_key)) > 5:
             models_to_try = [
@@ -462,7 +471,7 @@ Berikan ulasan terstruktur dalam format Markdown berbahasa Indonesia yang tegas,
                             "X-goog-api-key": gemini_key
                         },
                         json={
-                            "contents": [{"parts": [{"text": prompt_text}]}]
+                            "contents": [{"parts": [{"text": f"{system_prompt}\n\n{prompt_text}"}]}]
                         },
                         timeout=15
                     )
@@ -472,127 +481,268 @@ Berikan ulasan terstruktur dalam format Markdown berbahasa Indonesia yang tegas,
                             return candidates[0]["content"]["parts"][0]["text"]
                     elif res.status_code == 429:
                         logger.warning(f"Gemini API ({model_name}) Quota Exceeded (429): {res.text[:200]}")
-                        break  # Quota exceeded for project
+                        break
                 except Exception as e:
                     logger.warning(f"Gemini API call ({model_name}) failed: {e}.")
 
-        # Option 4: Structured Analytic AI Coach Fallback Engine (Data-driven, Production Ready)
-        logger.info("⚡ Executing Analytic AI Coach Fallback Engine...")
+        # Option 8: Master SMC Analytic AI Coach Fallback Engine
+        logger.info("⚡ Executing Master SMC Analytic AI Coach Fallback Engine...")
         return cls._generate_analytic_fallback_review(data)
 
     @classmethod
     def _generate_analytic_fallback_review(cls, data: Dict[str, Any]) -> str:
         """
-        Generates a deep, dynamic, data-driven qualitative analysis tailored specifically to
+        Generates a deep Master SMC Institutional Mentor qualitative analysis tailored specifically to
         trade outcome, exit reason, holding time, plan adherence, market context, and historical setup metrics.
         """
         outcome = data["outcome"]
         rr = data["rr_realized"]
         pair = data["symbol_pair"]
         direction = data["direction"]
-        setup_str = ", ".join(data["setup_tags"]) if data["setup_tags"] else "Tidak bertag"
+        setup_str = ", ".join(data["setup_tags"]) if data["setup_tags"] else "Order Block / Liquidity Sweep / FVG"
         psych = data["psychology"]
         hist = data["historical_similar_setup"]
         mkt = data["market_context"]
         adherence = psych["plan_adherence"]
         conf = psych["confidence_level"]
-        psych_tags = ", ".join(psych["psychological_tags"]) if psych["psychological_tags"] else "Stabil (Tanpa bias emosional)"
+        psych_tags = ", ".join(psych["psychological_tags"]) if psych["psychological_tags"] else "Stabil (Terfungsi sempurna)"
         exit_reason = data.get("exit_reason", "N/A")
         holding_mins = data.get("holding_time_minutes", 0)
 
         # 1. Executive Summary & Duration Dynamics
         if outcome == "WIN":
-            summary = f"Posisi **{direction} {pair}** berhasil menghasilkan profit sebesar **+{rr} R**. Eksekusi berjalan efektif selaras dengan pergerakan pasar."
+            summary = f"🔥 **Eksekusi Presisi SMC**: Posisi **{direction} {pair}** berhasil memanen profit **+{rr} R**. Struktur pergerakan *Smart Money Order Flow* berjalan efisien memenuhi area *liquidity target* Anda."
         elif outcome == "LOSS":
-            summary = f"Posisi **{direction} {pair}** berakhir rugi sebesar **{rr} R**. Risiko terbatasi sesuai batas Stop Loss yang direncanakan."
+            summary = f"🛡️ **Proteksi Modal Teruji**: Posisi **{direction} {pair}** menyentuh Stop Loss sebesar **{rr} R**. Ingat prinsip utama menumbuhkan modal kecil: *1R loss adalah biaya bisnis wajib untuk memburu kemenangan 2R hingga 5R+ saat Liquidity Sweep terkonfirmasi*."
         else:
-            summary = f"Posisi **{direction} {pair}** ditutup pada **Breakeven (0 R)** tanpa keuntungan atau kerugian bersih."
+            summary = f"⚖️ **Breakeven Defense**: Posisi **{direction} {pair}** ditutup pada **0 R**. Pengamanan posisi di titik Breakeven (*BE Move*) berhasil melindungi modal dari pergerakan pembalikan tak terduga."
 
         # Duration context
         if holding_mins > 0:
             if holding_mins < 15:
-                dur_desc = f"Posisi berlangsung sangat cepat (**{holding_mins} menit** - Scalp). Perhatikan dampak akumulasi fee transaksi pada frekuensi trading tinggi."
+                dur_desc = f"Posisi berlangsung sangat kilat (**{holding_mins} menit** - Scalp). Pastikan entry ini murni dipicu *LTF CHOCH / Liquidity Sweep* di POI HTF, bukan karena godaan *candle chasing* impulsif."
             elif holding_mins <= 240:
-                dur_desc = f"Durasi posisi berjalan terukur selama **{holding_mins} menit** (Intraday)."
+                dur_desc = f"Durasi eksekusi berjalan terukur selama **{holding_mins} menit** (Intraday SMC Expansion Phase)."
             else:
-                dur_desc = f"Posisi ditahan relatif lama selama **{holding_mins} menit ({holding_mins // 60} jam)** (Swing)."
-            summary += f"\n• *Durasi Execution*: {dur_desc}"
+                dur_desc = f"Posisi ditahan selama **{holding_mins} menit ({holding_mins // 60} jam)** (Swing Structural Position)."
+            summary += f"\n• *Dynamic Duration*: {dur_desc}"
 
-        # Exit Reason Detail
+        # Exit Reason SMC Detail
         if exit_reason == "take_profit":
-            summary += "\n• *Alasan Exit*: 🎯 **Take Profit (TP)** tersentuh sesuai target harga utama."
+            summary += "\n• *Mekanisme Exit*: 🎯 **Take Profit (TP)** tersentuh presisi di area *Unmitigated Order Block / Liquidity Pool* lawan."
         elif exit_reason == "stop_loss":
-            summary += "\n• *Alasan Exit*: 🛡️ **Stop Loss (SL)** tersentuh, menghentikan akumulasi risiko."
+            summary += "\n• *Mekanisme Exit*: 🛡️ **Stop Loss (SL)** tersentuh. Selalu validasi bahwa SL Anda diletakkan di luar *Invalidation Level / Liquidity Sweep High-Low* yang aman."
         elif exit_reason == "manual_close":
-            summary += "\n• *Alasan Exit*: ✋ **Manual Close** sebelum mengenai TP/SL. Evaluasi apakah penutupan manual ini didasari sinyal struktur harga yang valid atau rasa cemas (*anxiety*)."
+            summary += "\n• *Mekanisme Exit*: ✋ **Manual Close** sebelum TP/SL. Kunci utama menumbuhkan modal kecil menjadi besar adalah membiarkan target R-Multiple berjalan tanpa ditarik secara prematur karena cemas."
         elif exit_reason == "breakeven":
-            summary += "\n• *Alasan Exit*: ⚖️ **Break Even Move** dipicu untuk mengamankan posisi."
+            summary += "\n• *Mekanisme Exit*: ⚖️ **Break Even Move** dipicu untuk mengamankan posisi pasca-pembentukan *BOS / Displacement baru*."
 
         # 2. Plan Adherence & Psychology Assessment
         if adherence:
             psych_review = (
-                f"✅ **Disiplin Teruji**: Anda menunjukkan adherensi rencana trading yang baik (Plan Adherence: YA). "
-                f"Tingkat kepercayaan saat entry ({conf}/10) berada pada skala seimbang. "
-                f"Catatan emosi: *{psych_tags}*."
+                f"✅ **Disiplin Mentor SMC**: Anda menunjukkan disiplin eksekusi yang matang (*Plan Adherence: YA*). "
+                f"Tingkat keyakinan ({conf}/10) berada pada skala objektif. Catatan emosi: *{psych_tags}* menunjukkan ketenangan seorang profesional."
             )
         else:
             psych_review = (
-                f"⚠️ **Deviasi Rencana Trading**: Terdeteksi adanya penyimpangan dari rencana awal (Plan Adherence: TIDAK). "
-                f"Dengan tingkat kepercayaan {conf}/10 dan tag emosi *{psych_tags}*, periksa apakah entry ini terpengaruh oleh dorongan FOMO atau dorongan pembalasan (*revenge trading*)."
+                f"⚠️ **Peringatan Deviasi Rencana**: Terjadi penyimpangan dari rencana awal (*Plan Adherence: TIDAK*). "
+                f"Trader profesional yang berhasil menumbuhkan akun modal kecil HANYA mengeksekusi posisi yang memenuhi 100% kriteria SMC. Jangan biarkan emosi *{psych_tags}* membajak keputusan entry Anda!"
             )
 
         if psych["free_notes"]:
-            psych_review += f"\n• *Catatan Jurnal*: \"{psych['free_notes']}\""
+            psych_review += f"\n• *Refleksi Jurnal*: \"{psych['free_notes']}\""
 
-        # Market trend alignment
         htf = mkt.get("trend_htf", "N/A")
         ltf = mkt.get("trend_ltf", "N/A")
         if htf != "N/A" and ltf != "N/A":
             if (direction == "LONG" and htf.lower() == "bullish") or (direction == "SHORT" and htf.lower() == "bearish"):
-                psych_review += f"\n• *Struktur Pasar*: 🔥 Entry **{direction}** searah dengan Trend HTF ({htf.upper()}), meningkatkan probabilitas sukses."
+                psych_review += f"\n• *Struktur Pasar*: 🔥 Entry **{direction}** searah dengan Trend HTF ({htf.upper()}), memberikan dorongan konfluensi institusional yang kuat."
             elif (direction == "LONG" and htf.lower() == "bearish") or (direction == "SHORT" and htf.lower() == "bullish"):
-                psych_review += f"\n• *Struktur Pasar*: ⚠️ Entry **{direction}** berlawanan dengan Trend HTF ({htf.upper()}). Membutuhkan konfirmasi pembalikan arah LTF yang sangat presisi."
+                psych_review += f"\n• *Struktur Pasar*: ⚠️ Entry **{direction}** berlawanan arah dengan Trend HTF ({htf.upper()}). Perdagangan *Counter-Trend* membutuhkan konfirmasi *Liquidity Sweep & CHOCH LTF* yang sangat presisi."
 
         # 3. Historical Setup Comparison
         if hist["sample_size"] > 0:
             hist_review = (
-                f"Kombinasi setup **[{setup_str}]** tercatat memiliki populasi **{hist['sample_size']} trade** historis serupa "
-                f"dengan Win Rate **{hist['win_rate_pct']}%** dan Expectancy statistik **{hist['expectancy_r']} R**.\n"
+                f"Populasi data statistik untuk kombinasi setup **[{setup_str}]** mencatat **{hist['sample_size']} trade** historis serupa "
+                f"dengan Win Rate **{hist['win_rate_pct']}%** dan Expectancy jangka panjang **{hist['expectancy_r']} R**.\n"
             )
             if outcome == "WIN" and rr > hist["avg_rr"]:
-                hist_review += f"Hasil trade ini (+{rr} R) **melampaui rata-rata Risk-to-Reward historisnya ({hist['avg_rr']} R)**, menunjukkan kualitas eksekusi titik exit yang optimal."
+                hist_review += f"Hasil trade ini (+{rr} R) **melampaui rata-rata R-Multiple historisnya ({hist['avg_rr']} R)**, membuktikan presisi penempatan TP di area Liquidity Pool lawan."
             elif outcome == "LOSS":
-                hist_review += f"Meskipun trade ini berakhir rugi, ekspektasi statistik jangka panjang setup **[{setup_str}]** tetap **{hist['expectancy_r']} R**. Kerugian acak adalah bagian alami dari sampel statistik."
+                hist_review += f"Meskipun trade ini berakhir rugi, ekspektasi statistik jangka panjang setup **[{setup_str}]** tetap **{hist['expectancy_r']} R**. Dalam model 1R Equity Risk, variansi rugi pendek tidak boleh mengganggu keyakinan eksekusi Anda."
         else:
             hist_review = (
-                f"Ini adalah transaksi pertama untuk kombinasi setup **[{setup_str}]**. Data sampel historis belum mencukupi ($n=0$). "
+                f"Ini adalah transaksi awal untuk kombinasi setup **[{setup_str}]**. Data sampel historis belum mencukupi ($n=0$). "
                 f"Kumpulkan hingga 20 trade bertag identik untuk mengaktifkan kalkulasi Edge Discovery."
             )
 
-        # 4. Actionable Key Takeaways
+        # 4. Actionable Key Takeaways for Scaling Account
         takeaways = []
         if not adherence:
-            takeaways.append("• **Aksi Kunci**: Jangan pernah membuka posisi tanpa menandai kriteria setup Quick-Tag secara lengkap di lembar jurnal.")
+            takeaways.append("• **Instruksi Mentor**: Dilarang keras menekan tombol Entry tanpa menandai syarat setup SMC lengkap di Quick-Tag. Kedisiplinan adalah pintu utama pertumbuhan akun.")
         if outcome == "LOSS" and holding_mins < 10:
-            takeaways.append("• **Aksi Kunci**: Durasi trade sangat singkat pasca-entry. Berikan posisi ruang bernapas sesuai jarak ATR/SL awal.")
+            takeaways.append("• **Instruksi Mentor**: Durasi trade terlalu singkat pasca-entry. Biarkan struktur harga bernapas sesuai perhitungan ATR dan jarak SL awal.")
         if outcome == "WIN" and rr >= 2.0:
-            takeaways.append("• **Aksi Kunci**: Pertahankan teknik penguncian profit (trailing stop/partial exit) saat R-multiple melampaui +2R.")
+            takeaways.append("• **Instruksi Mentor**: Kunci profit secara bertahap saat R-Multiple melampaui +2R dengan menggeser SL ke Breakeven setelah pembentukan BOS baru.")
         if exit_reason == "manual_close":
-            takeaways.append("• **Aksi Kunci**: Catat alasan pasti penutupan manual pada kolom catatan bebas untuk mengevaluasi apakah exit manual tersebut konsisten menambah profit atau merusak expectancy.")
-        
-        if not takeaways:
-            takeaways.append("• Pertahankan konsistensi dokumentasi jurnal harian dan jaga rasio risiko per trade tetap konstan.")
-            takeaways.append("• Evaluasi kembali titik entry pada timeframe LTF untuk mengoptimalkan presisi Risk-to-Reward.")
+            takeaways.append("• **Instruksi Mentor**: Evaluasi alasan penutupan manual pada jurnal. Menutupi posisi terlalu cepat menghancurkan ekspektasi matematis RR tinggi.")
 
-        return f"""📌 **Ringkasan Eksekusi & Hasil**
+        if not takeaways:
+            takeaways.append("• **Instruksi Mentor**: Pertahankan manajemen risiko 1R ekuitas konstan ($0.96) dan fokus pada konfluensi HTF Discount/Premium Zone.")
+            takeaways.append("• **Instruksi Mentor**: Selalu tunggu pembentukan *Liquidity Sweep & CHOCH* sebelum mengeksekusi entry di LTF.")
+
+        return f"""📌 **Analisis Eksekusi SMC & Order Flow Pasar**
 {summary}
 
-🧠 **Analisis Psikologi & Adherensi Rencana**
+🧠 **Audit Psikologi, Bias Mental & Adherensi Plan**
 {psych_review}
 
-📊 **Perbandingan dengan Histori Setup**
+📊 **Ekspektasi Matematik Jangka Panjang vs Variansi Acak**
 {hist_review}
 
-💡 **Rekomendasi & Tindakan Kunci**
+💡 **Instruksi Kunci Mentor SMC untuk Scaling Modal**
 {chr(10).join(takeaways)}
+""".strip()
+
+    @classmethod
+    def generate_weekly_review(cls, db: Session, start_date: str, end_date: str, data_source: str = "all") -> Dict[str, Any]:
+        """
+        Generates weekly AI Coach executive evaluation for all trades within the specified date range.
+        Synthesizes weekly performance, psychological tendencies, plan adherence, setup efficiency,
+        and provides 3 key mindset directives for the upcoming trading week.
+        """
+        try:
+            s_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            e_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+        except Exception:
+            raise ValueError("Format tanggal harus YYYY-MM-DD (contoh: 2026-07-27).")
+
+        query = db.query(Trade).filter(
+            Trade.entry_time >= s_dt,
+            Trade.entry_time <= e_dt,
+            Trade.exit_time != None
+        )
+        if data_source and data_source != "all":
+            query = query.filter(Trade.data_source == data_source)
+
+        trades = query.all()
+        if not trades:
+            return {
+                "start_date": start_date,
+                "end_date": end_date,
+                "total_trades": 0,
+                "review_markdown": f"### 🤖 Evaluasi AI Coach Mingguan ({start_date} s/d {end_date})\n\nBelum ada transaksi tertutup yang tercatat pada rentang minggu ini. Lakukan entry transaksi baru dan catat Quick-Tag untuk mulai mengumpulkan statistik evaluasi mingguan Anda."
+            }
+
+        # Calculate weekly metrics
+        total_trades = len(trades)
+        wins = [t for t in trades if t.pnl and float(t.pnl) > 0]
+        win_rate = (len(wins) / total_trades) * 100.0 if total_trades > 0 else 0.0
+        total_pnl = sum(float(t.pnl) for t in trades if t.pnl)
+        total_r = sum(float(t.rr_realized) for t in trades if t.rr_realized)
+
+        # Gather psychology metrics
+        psychologies = []
+        for t in trades:
+            if t.psychology:
+                psychologies.append(t.psychology)
+
+        adherence_count = sum(1 for p in psychologies if p.plan_adherence)
+        adherence_pct = (adherence_count / len(psychologies)) * 100.0 if psychologies else 100.0
+
+        # Collect psychological tags
+        all_tags = []
+        for p in psychologies:
+            if p.psychological_tags:
+                all_tags.extend(p.psychological_tags if isinstance(p.psychological_tags, list) else [])
+
+        from collections import Counter
+        tag_counts = Counter(all_tags)
+        top_tags_str = ", ".join([f"{k} ({v}x)" for k, v in tag_counts.most_common(4)]) if tag_counts else "Sesuai Plan, Tenang"
+
+        # Generate LLM or Fallback Review
+        review_markdown = cls._build_weekly_review_markdown(
+            start_date=start_date,
+            end_date=end_date,
+            total_trades=total_trades,
+            win_rate=win_rate,
+            total_pnl=total_pnl,
+            total_r=total_r,
+            adherence_pct=adherence_pct,
+            top_tags_str=top_tags_str,
+            trades=trades
+        )
+
+        return {
+            "start_date": start_date,
+            "end_date": end_date,
+            "total_trades": total_trades,
+            "win_rate": round(win_rate, 1),
+            "total_pnl": round(total_pnl, 2),
+            "total_r": round(total_r, 2),
+            "adherence_pct": round(adherence_pct, 1),
+            "review_markdown": review_markdown
+        }
+
+    @classmethod
+    def _build_weekly_review_markdown(
+        cls,
+        start_date: str,
+        end_date: str,
+        total_trades: int,
+        win_rate: float,
+        total_pnl: float,
+        total_r: float,
+        adherence_pct: float,
+        top_tags_str: str,
+        trades: List[Trade]
+    ) -> str:
+        prompt_text = f"""Anda adalah Master Institutional Smart Money Concepts (SMC) & ICT Elite Trading Mentor yang berpengalaman mengubah modal kecil menjadi portofolio besar secara konsisten.
+
+Berikan evaluasi audit kualitatif mingguan yang sangat tajam, inspiratif, realistis, dan berorientasi pada pertumbuhan modal untuk trader berdasarkan data minggu ini ({start_date} s.d. {end_date}):
+
+METRIK AUDIT MINGGUAN:
+- Total Posisi: {total_trades} transaksi
+- Win Rate: {win_rate:.1f}%
+- Total PnL Bersih: ${total_pnl:.2f}
+- Akumulasi Realized RR: {total_r:+.2f} R
+- Kepatuhan Rencana Trading (Plan Adherence): {adherence_pct:.1f}%
+- Pola Emosi Dominan: {top_tags_str}
+
+Formatkan audit mingguan dalam 4 bagian Markdown terstruktur khas Mentor SMC Senior:
+1. 📊 **Audit Performa Executive & Pertumbuhan Ekuitas R**
+2. 🧠 **Review Psikologi, Kontrol Emosi & Kedisiplinan SMC**
+3. 🎯 **Analisis Efisiensi Order Flow & Eksekusi**
+4. 💡 **3 Instruksi Emas Mentor SMC untuk Scaling Akun Minggu Depan**
+
+Gunakan bahasa Indonesia yang tegas, bijak, profesional, mendalam, kaya terminologi SMC (Liquidity Sweeps, Discount/Premium, Order Block, FVG, 1R Risk), layaknya bimbingan privat dari mentor senior."""
+
+        try:
+            llm_res = cls._call_llm_provider(prompt_text, {})
+            if llm_res and len(llm_res) > 50:
+                return llm_res
+        except Exception as e:
+            logger.warning(f"LLM call failed for weekly review fallback: {e}")
+
+        pnl_sign = "+" if total_pnl >= 0 else ""
+        r_sign = "+" if total_r >= 0 else ""
+        status_eval = "sangat presisi dan berdisiplin tinggi" if total_r > 0 else "memerlukan pembenahan kontrol risiko & disiplin SMC"
+
+        return f"""### 🤖 Audit & Bimbingan Privat Mentor SMC Mingguan ({start_date} s/d {end_date})
+
+📊 **Audit Performa Executive & Pertumbuhan Ekuitas R**
+Minggu ini Anda telah menyelesaikan **{total_trades} posisi transaksi** dengan *Win Rate* **{win_rate:.1f}%**, menghasilkan pencapaian akumulasi **{r_sign}{total_r:.2f} R** ({pnl_sign}${total_pnl:.2f}). Kualitas eksekusi trading Anda pada periode ini dinilai **{status_eval}** dari kacamata ekspektasi matematis R-Multiple.
+
+🧠 **Review Psikologi, Kontrol Emosi & Kedisiplinan SMC**
+• Kepatuhan Rencana (*Plan Adherence*): **{adherence_pct:.1f}%** dari total posisi.
+• Kondisi Emosi Dominan: *{top_tags_str}*.
+• *Prinsip Mentor*: Kunci utama menumbuhkan modal kecil menjadi besar BUKAN dengan memperbesar leverage atau mengambil risiko nekat (gambling), melainkan menjaga keutuhan 1R Risk (1.0% Equity) secara religius dan membiarkan *Liquidity Sweep & Order Block mitigation* bekerja menghasilkan R-Multiple tinggi (1:2R hingga 1:5R+).
+
+🎯 **Analisis Efisiensi Order Flow & Eksekusi**
+Seluruh posisi minggu ini telah terdokumentasi di lembar jurnal. Penggunaan model **1R Equity Risk konstan** memastikan akun Anda terlindungi dari bahaya *catastrophic drawdown* saat menghadapi variansi acak pasar.
+
+💡 **3 Instruksi Emas Mentor SMC untuk Scaling Akun Minggu Depan**
+1. • **Instruksi 1 (SMC High Confluence Only)**: Hanya buka posisi entry ketika harga berada di *Discount Zone* untuk LONG atau *Premium Zone* untuk SHORT yang bertepatan dengan *Liquidity Sweep* di session Asia/London/NY.
+2. • **Instruksi 2 (Kunci Bias Subjektif di Quick-Tag)**: Jangan pernah melewatkan pengisian Quick-Tag dalam 120 detik pasca-entry untuk mengunci bias psikologis sebelum hasil trade keluar.
+3. • **Instruksi 3 (Kedisiplinan 1R Equity Risk)**: Jaga risiko per trade tepat di 1.0% Total Equity ($0.96). Biarkan ekspektasi positif matematika R-Multiple menumbuhkan saldo Anda secara konsisten dari minggu ke minggu.
 """.strip()

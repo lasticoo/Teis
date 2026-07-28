@@ -39,6 +39,41 @@ def request_ai_coach_review(
         )
 
 
+class AICoachWeeklyRequest(BaseModel):
+    start_date: str = Field(..., description="Start date YYYY-MM-DD")
+    end_date: str = Field(..., description="End date YYYY-MM-DD")
+    data_source: Optional[str] = Field("all", description="Source filter (all, binance_sync, historical_import, manual)")
+
+
+@router.post("/weekly-review")
+def request_ai_coach_weekly_review(
+    payload: AICoachWeeklyRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    POST /api/v1/ai-coach/weekly-review
+    Generates weekly qualitative evaluation and mindset guidance for all trades in the target week.
+    """
+    try:
+        review = AICoachService.generate_weekly_review(
+            db=db,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            data_source=payload.data_source or "all"
+        )
+        return review
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Layanan AI Coach Mingguan gagal memproses evaluasi: {str(e)}"
+        )
+
+
 @router.get("/review/{trade_id}")
 def get_existing_ai_coach_review(
     trade_id: str,
