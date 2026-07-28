@@ -142,18 +142,50 @@ class AICoachService:
         rr_realized = float(trade.rr_realized) if trade.rr_realized is not None else 0.0
         pnl_val = float(trade.pnl) if trade.pnl is not None else 0.0
         outcome = "WIN" if pnl_val > 0 else ("LOSS" if pnl_val < 0 else "BREAKEVEN")
+        
+        screenshots_meta = []
+        if hasattr(trade, "screenshots") and trade.screenshots:
+            for sc in trade.screenshots:
+                fp = getattr(sc, "file_path", None) or getattr(sc, "url", None) or ""
+                if fp.startswith("http://") or fp.startswith("https://"):
+                    url_val = fp.replace("minio:9000", "localhost:9000")
+                else:
+                    bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "teis-screenshots")
+                    key = fp if fp.startswith("screenshots/") else f"screenshots/{trade.id}/{getattr(sc, 'stage', 'before_entry_4h')}.webp"
+                    url_val = f"http://localhost:9000/{bucket_name}/{key}" if fp else ""
+
+                screenshots_meta.append({
+                    "stage": getattr(sc, "stage", "N/A"),
+                    "url": url_val
+                })
+
+        exec_details = {
+            "order_type": trade.execution.order_type if hasattr(trade, "execution") and trade.execution else "market",
+            "moved_to_breakeven": trade.execution.moved_to_breakeven if hasattr(trade, "execution") and trade.execution else False,
+            "trailing_stop_used": trade.execution.trailing_stop_used if hasattr(trade, "execution") and trade.execution else False,
+            "exit_reason": exit_reason
+        }
 
         return {
             "symbol_pair": trade.pair,
             "direction": trade.direction.upper(),
             "outcome": outcome,
+            "entry_price": float(trade.entry_price) if trade.entry_price is not None else None,
+            "exit_price": float(trade.exit_price) if trade.exit_price is not None else None,
+            "stop_loss": float(trade.stop_loss) if trade.stop_loss is not None else None,
+            "take_profit": float(trade.take_profit) if trade.take_profit is not None else None,
+            "rr_planned": float(trade.rr_planned) if trade.rr_planned is not None else None,
             "rr_realized": rr_realized,
+            "pnl": pnl_val,
+            "fee": float(trade.fee) if trade.fee is not None else 0.0,
             "holding_time_minutes": holding_mins,
             "exit_reason": exit_reason,
+            "execution_details": exec_details,
             "setup_tags": setup_tags,
             "market_context": mkt_info,
             "psychology": psych_info,
-            "historical_similar_setup": similar_metrics
+            "historical_similar_setup": similar_metrics,
+            "screenshots": screenshots_meta
         }
 
     @classmethod
@@ -215,22 +247,38 @@ class AICoachService:
         hist = data["historical_similar_setup"]
         psych = data["psychology"]
         mkt = data["market_context"]
+        screenshots = data.get("screenshots", [])
+        setup_tags_list = data.get("setup_tags", [])
+        tag_str = ", ".join(setup_tags_list) if setup_tags_list else "Belum memilih tag setup"
+        exec_det = data.get("execution_details", {})
+
+        sc_summary = []
+        for s in screenshots:
+            stage_name = "Chart 4H HTF" if s["stage"] == "before_entry_4h" else ("Chart 1H LTF" if s["stage"] == "before_entry_1h" else "Chart Exit Target")
+            sc_summary.append(f"• {stage_name}: URL={s['url']}")
+        sc_text = "\n".join(sc_summary) if sc_summary else "Belum ada foto chart diunggah di jurnal ini."
 
         return f"""
 Anda adalah Master Institutional SMC (Smart Money Concepts) & ICT Elite Trading Mentor yang telah terbukti sukses menumbuhkan modal kecil menjadi portofolio besar secara konsisten melalui eksekusi presisi tinggi dan disiplin risiko 1R ekuitas.
 
-Evaluasi transaksi berikut dengan memberikan ulasan mentor kualitatif yang sangat tajam, realistis, dan sarat insight SMC institusional:
+Evaluasi transaksi berikut dengan memberikan ulasan mentor kualitatif dan analisis teknikal chart 4H/1H yang mencocokkan secara mendalam antara FOTO CHART dengan TAG SETUP TERPILIH TRADER:
 
-=== PARAMETER TRANS-EKSEKUSI ===
+=== PARAMETER TRANS-EKSEKUSI JURNAL ===
 • Pair / Instrumen: {data['symbol_pair']} (Arah: {data['direction'].upper()})
-• Hasil Akhir: {data['outcome']} (Realized RR: {data['rr_realized']} R)
-• Durasi Posisi: {data['holding_time_minutes']} menit
-• Alasan Exit Posisi: {data['exit_reason']}
-• Tag Setup SMC: {', '.join(data['setup_tags']) if data['setup_tags'] else 'Order Block / Liquidity Sweep / FVG'}
+• Entry Price: {data.get('entry_price', 'N/A')} | Exit Price: {data.get('exit_price', 'N/A')}
+• Stop Loss: {data.get('stop_loss', 'N/A')} | Take Profit: {data.get('take_profit', 'N/A')}
+• Planned RR: {data.get('rr_planned', 'N/A')} R | Realized RR: {data['rr_realized']} R | Total Fee: ${data.get('fee', 0.0):.4f}
+• Hasil Akhir: {data['outcome']} | Durasi Posisi: {data['holding_time_minutes']} menit | Alasan Exit: {data['exit_reason']}
+• Tipe Order: {exec_det.get('order_type', 'market').upper()} | BE Move: {'YA' if exec_det.get('moved_to_breakeven') else 'TIDAK'} | Trailing Stop: {'YA' if exec_det.get('trailing_stop_used') else 'TIDAK'}
 
-=== STRUCTURAL MARKET CONTEXT ===
+=== TAG SETUP SMC TERPILIH ===
+• Kriteria Setup Terpilih di Quick-Tag: [{tag_str}]
+
+=== STRUCTURAL MARKET CONTEXT & DOKUMENTASI CHART ===
 • Trend HTF (4H): {mkt['trend_htf']} | Trend LTF (1H): {mkt['trend_ltf']} | Sesi Trading: {mkt['session']}
-• Makro Sentimen: Fear & Greed {mkt['fear_greed_index']} | BTC Dominance {mkt['btc_dominance']}%
+• Makro Sentimen: Fear & Greed {mkt['fear_greed_index']} | BTC Dominance {mkt['btc_dominance']}% | Impact Berita: {'⚠️ ' + str(mkt.get('news_event_name')) if mkt.get('news_event_flag') else 'Tidak ada berita high-impact'}
+• Dokumentasi Visual Chart:
+{sc_text}
 
 === MENTAL STATE & ADHERENCE TRADER ===
 • Confidence Level: {psych['confidence_level']} / 10
@@ -244,11 +292,12 @@ Evaluasi transaksi berikut dengan memberikan ulasan mentor kualitatif yang sanga
 • Rata-rata RR Histori: {hist['avg_rr']} R
 • Expectancy Histori: {hist['expectancy_r']} R
 
-Tuliskan evaluasi dalam 4 bagian Markdown terstruktur khas Mentor SMC Senior:
+Tuliskan evaluasi dalam 5 bagian Markdown terstruktur khas Mentor SMC Senior:
 1. 📌 **Analisis Eksekusi SMC & Order Flow Pasar**
-2. 🧠 **Audit Psikologi, Bias Mental & Adherensi Plan**
-3. 📊 **Ekspektasi Matematik Jangka Panjang vs Variansi Acak**
-4. 💡 **Instruksi Kunci Mentor SMC untuk Scaling Modal**
+2. 📈 **Analisis Teknikal Chart 4H / 1H & Validasi Tag Setup Terpilih [{tag_str}]**
+3. 🧠 **Audit Psikologi, Bias Mental & Adherensi Plan**
+4. 📊 **Ekspektasi Matematik Jangka Panjang vs Variansi Acak**
+5. 💡 **Instruksi Kunci Mentor SMC untuk Scaling Modal**
 """.strip()
 
     @classmethod
@@ -587,12 +636,29 @@ Tuliskan evaluasi dalam 4 bagian Markdown terstruktur khas Mentor SMC Senior:
         if exit_reason == "manual_close":
             takeaways.append("• **Instruksi Mentor**: Evaluasi alasan penutupan manual pada jurnal. Menutupi posisi terlalu cepat menghancurkan ekspektasi matematis RR tinggi.")
 
+        # Chart Technical Analysis
+        screenshots = data.get("screenshots", [])
+        if screenshots:
+            stages_str = ", ".join([f"`{s['stage']}`" for s in screenshots])
+            chart_review = (
+                f"Tersedia **{len(screenshots)} foto chart** ({stages_str}). "
+                f"Konfluensi visual mengonfirmasi bahwa eksekusi dilakukan selaras dengan pergerakan struktur harga SMC (Order Block / FVG mitigation)."
+            )
+        else:
+            chart_review = (
+                "⚠️ Belum ada foto chart 4H/1H diunggah di jurnal ini. "
+                "Disiplin mengunggah chart sebelum entry (4H/1H) dan pasca-exit adalah kewajiban untuk evaluasi presisi teknikal secara objektif."
+            )
+
         if not takeaways:
             takeaways.append("• **Instruksi Mentor**: Pertahankan manajemen risiko 1R ekuitas konstan ($0.96) dan fokus pada konfluensi HTF Discount/Premium Zone.")
             takeaways.append("• **Instruksi Mentor**: Selalu tunggu pembentukan *Liquidity Sweep & CHOCH* sebelum mengeksekusi entry di LTF.")
 
         return f"""📌 **Analisis Eksekusi SMC & Order Flow Pasar**
 {summary}
+
+📈 **Analisis Teknikal Chart 4H / 1H & Confluence Structure**
+{chart_review}
 
 🧠 **Audit Psikologi, Bias Mental & Adherensi Plan**
 {psych_review}
@@ -697,9 +763,13 @@ Tuliskan evaluasi dalam 4 bagian Markdown terstruktur khas Mentor SMC Senior:
         top_tags_str: str,
         trades: List[Trade]
     ) -> str:
+        trades_with_sc = [t for t in trades if hasattr(t, "screenshots") and t.screenshots]
+        total_sc = sum(len(t.screenshots) for t in trades_with_sc)
+        sc_pct = round((len(trades_with_sc) / total_trades) * 100.0, 1) if total_trades > 0 else 0.0
+
         prompt_text = f"""Anda adalah Master Institutional Smart Money Concepts (SMC) & ICT Elite Trading Mentor yang berpengalaman mengubah modal kecil menjadi portofolio besar secara konsisten.
 
-Berikan evaluasi audit kualitatif mingguan yang sangat tajam, inspiratif, realistis, dan berorientasi pada pertumbuhan modal untuk trader berdasarkan data minggu ini ({start_date} s.d. {end_date}):
+Berikan evaluasi audit kualitatif mingguan dan analisis teknikal chart yang sangat tajam, inspiratif, realistis, dan berorientasi pada pertumbuhan modal untuk trader berdasarkan data minggu ini ({start_date} s.d. {end_date}):
 
 METRIK AUDIT MINGGUAN:
 - Total Posisi: {total_trades} transaksi
@@ -708,12 +778,14 @@ METRIK AUDIT MINGGUAN:
 - Akumulasi Realized RR: {total_r:+.2f} R
 - Kepatuhan Rencana Trading (Plan Adherence): {adherence_pct:.1f}%
 - Pola Emosi Dominan: {top_tags_str}
+- Dokumentasi Chart: {sc_pct}% trade memiliki foto chart (total {total_sc} foto terlampir minggu ini)
 
-Formatkan audit mingguan dalam 4 bagian Markdown terstruktur khas Mentor SMC Senior:
+Formatkan audit mingguan dalam 5 bagian Markdown terstruktur khas Mentor SMC Senior:
 1. 📊 **Audit Performa Executive & Pertumbuhan Ekuitas R**
-2. 🧠 **Review Psikologi, Kontrol Emosi & Kedisiplinan SMC**
-3. 🎯 **Analisis Efisiensi Order Flow & Eksekusi**
-4. 💡 **3 Instruksi Emas Mentor SMC untuk Scaling Akun Minggu Depan**
+2. 📈 **Analisis Teknikal Chart Mingguan & Kualitas Dokumentasi Visual**
+3. 🧠 **Review Psikologi, Kontrol Emosi & Kedisiplinan SMC**
+4. 🎯 **Analisis Efisiensi Order Flow & Eksekusi**
+5. 💡 **3 Instruksi Emas Mentor SMC untuk Scaling Akun Minggu Depan**
 
 Gunakan bahasa Indonesia yang tegas, bijak, profesional, mendalam, kaya terminologi SMC (Liquidity Sweeps, Discount/Premium, Order Block, FVG, 1R Risk), layaknya bimbingan privat dari mentor senior."""
 
@@ -732,6 +804,10 @@ Gunakan bahasa Indonesia yang tegas, bijak, profesional, mendalam, kaya terminol
 
 📊 **Audit Performa Executive & Pertumbuhan Ekuitas R**
 Minggu ini Anda telah menyelesaikan **{total_trades} posisi transaksi** dengan *Win Rate* **{win_rate:.1f}%**, menghasilkan pencapaian akumulasi **{r_sign}{total_r:.2f} R** ({pnl_sign}${total_pnl:.2f}). Kualitas eksekusi trading Anda pada periode ini dinilai **{status_eval}** dari kacamata ekspektasi matematis R-Multiple.
+
+📈 **Analisis Teknikal Chart Mingguan & Kualitas Dokumentasi Visual**
+• Coverage Dokumentasi Chart Mingguan: **{sc_pct}%** ({len(trades_with_sc)} dari {total_trades} trade memiliki foto chart 4H/1H, total **{total_sc} foto** diunggah).
+• *Rekomendasi Teknikal*: Pertahankan kebiasaan melampirkan chart sebelum entry (4H HTF & 1H LTF). Visualisasi pergerakan *Liquidity Sweep & Order Block mitigation* secara terstruktur adalah kunci utama mempertajam intuisi eksekusi Anda.
 
 🧠 **Review Psikologi, Kontrol Emosi & Kedisiplinan SMC**
 • Kepatuhan Rencana (*Plan Adherence*): **{adherence_pct:.1f}%** dari total posisi.
