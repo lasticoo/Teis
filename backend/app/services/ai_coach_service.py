@@ -79,6 +79,9 @@ class AICoachService:
         # 6. Gather Historical Setup Metrics
         similar_metrics = cls._fetch_similar_setup_metrics(db, setup_tags, current_trade_id=trade_id)
 
+        # 6.5 Gather Daily Equity Growth Progression (14 Days Window)
+        equity_growth = cls._fetch_daily_equity_progression(db, target_date=trade.entry_time, days=14)
+
         # 7. Anonymize Trade Data (Strict Rule: NO raw balance, NO API keys, NO leverage, NO USD margin)
         anonymized_payload = cls._anonymize_trade_data(
             trade=trade,
@@ -86,7 +89,8 @@ class AICoachService:
             mkt_info=mkt_info,
             psych_info=psych_info,
             exit_reason=exit_reason,
-            similar_metrics=similar_metrics
+            similar_metrics=similar_metrics,
+            equity_growth=equity_growth
         )
 
         # 8. Build Prompt
@@ -128,7 +132,8 @@ class AICoachService:
         mkt_info: Dict[str, Any],
         psych_info: Dict[str, Any],
         exit_reason: str,
-        similar_metrics: Dict[str, Any]
+        similar_metrics: Dict[str, Any],
+        equity_growth: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Filters and anonymizes trade details according to Security Rule 9 & 16:
@@ -185,7 +190,8 @@ class AICoachService:
             "market_context": mkt_info,
             "psychology": psych_info,
             "historical_similar_setup": similar_metrics,
-            "screenshots": screenshots_meta
+            "screenshots": screenshots_meta,
+            "equity_growth": equity_growth or {}
         }
 
     @classmethod
@@ -240,6 +246,76 @@ class AICoachService:
         }
 
     @classmethod
+    def _fetch_daily_equity_progression(cls, db: Session, target_date: Optional[datetime] = None, days: int = 14) -> Dict[str, Any]:
+        """
+        Calculates daily day-by-day account equity growth progression (R-Multiple trajectory & PnL velocity).
+        Enables AI Coach to track whether the account equity is expanding, consolidating, or recovering from drawdown.
+        """
+        from datetime import timedelta
+        from collections import defaultdict
+
+        ref_date = target_date or datetime.now()
+        start_dt = ref_date - timedelta(days=days)
+
+        trades = db.query(Trade).filter(
+            Trade.entry_time >= start_dt,
+            Trade.entry_time <= ref_date,
+            Trade.exit_time != None
+        ).order_by(Trade.entry_time.asc()).all()
+
+        if not trades:
+            return {
+                "days_evaluated": days,
+                "total_trades_window": 0,
+                "cumulative_r_trajectory": 0.0,
+                "equity_phase": "STABLE_BASELINE (Baseline Ekuitas Awal)",
+                "daily_progression_str": "Belum ada riwayat transaksi tertutup dalam 14 hari terakhir."
+            }
+
+        daily_r_map = defaultdict(float)
+        daily_pnl_map = defaultdict(float)
+        daily_count_map = defaultdict(int)
+
+        for t in trades:
+            d_str = t.entry_time.strftime("%Y-%m-%d")
+            r_val = float(t.rr_realized) if t.rr_realized is not None else 0.0
+            pnl_val = float(t.pnl) if t.pnl is not None else 0.0
+
+            daily_r_map[d_str] += r_val
+            daily_pnl_map[d_str] += pnl_val
+            daily_count_map[d_str] += 1
+
+        sorted_dates = sorted(daily_r_map.keys())
+        cum_r = 0.0
+        daily_summary_lines = []
+
+        for d in sorted_dates:
+            r_day = daily_r_map[d]
+            cnt_day = daily_count_map[d]
+            cum_r += r_day
+            sign_r = "+" if r_day >= 0 else ""
+            sign_cum = "+" if cum_r >= 0 else ""
+            daily_summary_lines.append(f"• {d}: {cnt_day} trade | Net R Harian: {sign_r}{r_day:.2f} R (Akumulasi Ekuitas: {sign_cum}{cum_r:.2f} R)")
+
+        if cum_r >= 3.0:
+            equity_phase = "🚀 EXPANSION_PEAK (Ekuitas Akun Tumbuh Pesat Merekam Peak R)"
+        elif cum_r > 0:
+            equity_phase = "📈 CONSISTENT_GROWTH (Ekuitas Tumbuh Positif Secara Bertahap)"
+        elif cum_r == 0:
+            equity_phase = "⚖️ BREAKEVEN_CONSOLIDATION (Ekuitas Konsolidasi Seimbang)"
+        else:
+            equity_phase = "🛡️ DRAWDOWN_RECOVERY (Ekuitas Mengalami Drawdown, Memerlukan Proteksi 1R)"
+
+        return {
+            "days_evaluated": days,
+            "total_trades_window": len(trades),
+            "cumulative_r_trajectory": round(cum_r, 2),
+            "equity_phase": equity_phase,
+            "daily_summary_lines": daily_summary_lines,
+            "daily_progression_str": "\n".join(daily_summary_lines) if daily_summary_lines else "Tanpa fluktuasi ekuitas harian"
+        }
+
+    @classmethod
     def _build_prompt(cls, data: Dict[str, Any]) -> str:
         """
         Constructs an elite Master SMC Institutional Trading Coach evaluation prompt.
@@ -251,6 +327,7 @@ class AICoachService:
         setup_tags_list = data.get("setup_tags", [])
         tag_str = ", ".join(setup_tags_list) if setup_tags_list else "Belum memilih tag setup"
         exec_det = data.get("execution_details", {})
+        eq_growth = data.get("equity_growth", {})
 
         sc_summary = []
         for s in screenshots:
@@ -261,7 +338,7 @@ class AICoachService:
         return f"""
 Anda adalah Master Institutional SMC (Smart Money Concepts) & ICT Elite Trading Mentor yang telah terbukti sukses menumbuhkan modal kecil menjadi portofolio besar secara konsisten melalui eksekusi presisi tinggi dan disiplin risiko 1R ekuitas.
 
-Evaluasi transaksi berikut dengan memberikan ulasan mentor kualitatif dan analisis teknikal chart 4H/1H yang mencocokkan secara mendalam antara FOTO CHART dengan TAG SETUP TERPILIH TRADER:
+Evaluasi transaksi berikut dengan memberikan ulasan mentor kualitatif, analisis teknikal chart 4H/1H (pencocokan tag setup terpilih), DAN analisis pertumbuhan ekuitas akun harian (Equity Growth Trajectory):
 
 === PARAMETER TRANS-EKSEKUSI JURNAL ===
 • Pair / Instrumen: {data['symbol_pair']} (Arah: {data['direction'].upper()})
@@ -270,6 +347,12 @@ Evaluasi transaksi berikut dengan memberikan ulasan mentor kualitatif dan analis
 • Planned RR: {data.get('rr_planned', 'N/A')} R | Realized RR: {data['rr_realized']} R | Total Fee: ${data.get('fee', 0.0):.4f}
 • Hasil Akhir: {data['outcome']} | Durasi Posisi: {data['holding_time_minutes']} menit | Alasan Exit: {data['exit_reason']}
 • Tipe Order: {exec_det.get('order_type', 'market').upper()} | BE Move: {'YA' if exec_det.get('moved_to_breakeven') else 'TIDAK'} | Trailing Stop: {'YA' if exec_det.get('trailing_stop_used') else 'TIDAK'}
+
+=== PERTUMBUHAN EKUITAS AKUN HARIAN (EQUITY GROWTH TRAJECTORY) ===
+• Fase Kurva Ekuitas: {eq_growth.get('equity_phase', 'STABLE_BASELINE')}
+• Trajektori Kumulatif (14 Hari): {eq_growth.get('cumulative_r_trajectory', 0.0)} R
+• Riwayat Pertumbuhan R Harian:
+{eq_growth.get('daily_progression_str', 'Belum ada transaksi')}
 
 === TAG SETUP SMC TERPILIH ===
 • Kriteria Setup Terpilih di Quick-Tag: [{tag_str}]
@@ -292,12 +375,13 @@ Evaluasi transaksi berikut dengan memberikan ulasan mentor kualitatif dan analis
 • Rata-rata RR Histori: {hist['avg_rr']} R
 • Expectancy Histori: {hist['expectancy_r']} R
 
-Tuliskan evaluasi dalam 5 bagian Markdown terstruktur khas Mentor SMC Senior:
+Tuliskan evaluasi dalam 6 bagian Markdown terstruktur khas Mentor SMC Senior:
 1. 📌 **Analisis Eksekusi SMC & Order Flow Pasar**
 2. 📈 **Analisis Teknikal Chart 4H / 1H & Validasi Tag Setup Terpilih [{tag_str}]**
-3. 🧠 **Audit Psikologi, Bias Mental & Adherensi Plan**
-4. 📊 **Ekspektasi Matematik Jangka Panjang vs Variansi Acak**
-5. 💡 **Instruksi Kunci Mentor SMC untuk Scaling Modal**
+3. 📉 **Pertumbuhan Ekuitas Akun Harian (Daily Equity Growth & R Trajectory)**
+4. 🧠 **Audit Psikologi, Bias Mental & Adherensi Plan**
+5. 📊 **Ekspektasi Matematik Jangka Panjang vs Variansi Acak**
+6. 💡 **Instruksi Kunci Mentor SMC untuk Scaling Modal**
 """.strip()
 
     @classmethod
@@ -638,17 +722,31 @@ Tuliskan evaluasi dalam 5 bagian Markdown terstruktur khas Mentor SMC Senior:
 
         # Chart Technical Analysis
         screenshots = data.get("screenshots", [])
+        setup_tags = data.get("setup_tags", [])
+        tag_str = ", ".join(setup_tags) if setup_tags else "Order Block / Liquidity Sweep / FVG"
         if screenshots:
             stages_str = ", ".join([f"`{s['stage']}`" for s in screenshots])
             chart_review = (
-                f"Tersedia **{len(screenshots)} foto chart** ({stages_str}). "
+                f"Tersedia **{len(screenshots)} foto chart** ({stages_str}).\n"
+                f"• *Validasi Tag Setup*: Tag terpilih **[{tag_str}]** dicocokkan secara visual. "
                 f"Konfluensi visual mengonfirmasi bahwa eksekusi dilakukan selaras dengan pergerakan struktur harga SMC (Order Block / FVG mitigation)."
             )
         else:
             chart_review = (
-                "⚠️ Belum ada foto chart 4H/1H diunggah di jurnal ini. "
-                "Disiplin mengunggah chart sebelum entry (4H/1H) dan pasca-exit adalah kewajiban untuk evaluasi presisi teknikal secara objektif."
+                f"⚠️ Kriteria tag **[{tag_str}]** telah dipilih di Quick-Tag, namun foto chart 4H/1H belum diunggah. "
+                f"Disiplin mengunggah chart sebelum entry (4H/1H) dan pasca-exit adalah kewajiban untuk evaluasi presisi teknikal secara objektif."
             )
+
+        # Equity Growth Trajectory
+        eq_growth = data.get("equity_growth", {})
+        eq_phase = eq_growth.get("equity_phase", "STABLE_BASELINE")
+        cum_r_traj = eq_growth.get("cumulative_r_trajectory", 0.0)
+        daily_str = eq_growth.get("daily_progression_str", "Belum ada transaksi")
+        
+        equity_review = (
+            f"Fase Kurva Ekuitas: **{eq_phase}** (Trajektori Kumulatif: **{cum_r_traj:+.2f} R**).\n"
+            f"• *Riwayat Pergerakan R Harian*:\n{daily_str}"
+        )
 
         if not takeaways:
             takeaways.append("• **Instruksi Mentor**: Pertahankan manajemen risiko 1R ekuitas konstan ($0.96) dan fokus pada konfluensi HTF Discount/Premium Zone.")
@@ -657,8 +755,11 @@ Tuliskan evaluasi dalam 5 bagian Markdown terstruktur khas Mentor SMC Senior:
         return f"""📌 **Analisis Eksekusi SMC & Order Flow Pasar**
 {summary}
 
-📈 **Analisis Teknikal Chart 4H / 1H & Confluence Structure**
+📈 **Analisis Teknikal Chart 4H / 1H & Validasi Tag Setup Terpilih [{tag_str}]**
 {chart_review}
+
+📉 **Pertumbuhan Ekuitas Akun Harian (Daily Equity Growth & R Trajectory)**
+{equity_review}
 
 🧠 **Audit Psikologi, Bias Mental & Adherensi Plan**
 {psych_review}
@@ -767,9 +868,27 @@ Tuliskan evaluasi dalam 5 bagian Markdown terstruktur khas Mentor SMC Senior:
         total_sc = sum(len(t.screenshots) for t in trades_with_sc)
         sc_pct = round((len(trades_with_sc) / total_trades) * 100.0, 1) if total_trades > 0 else 0.0
 
+        # Calculate daily R progression
+        from collections import defaultdict
+        daily_r_map = defaultdict(float)
+        daily_count_map = defaultdict(int)
+        for t in trades:
+            d_str = t.entry_time.strftime("%Y-%m-%d")
+            daily_r_map[d_str] += float(t.rr_realized) if t.rr_realized is not None else 0.0
+            daily_count_map[d_str] += 1
+
+        daily_lines = []
+        cum_r_wk = 0.0
+        for d_str in sorted(daily_r_map.keys()):
+            r_d = daily_r_map[d_str]
+            cnt_d = daily_count_map[d_str]
+            cum_r_wk += r_d
+            daily_lines.append(f"• {d_str}: {cnt_d} trade | Net R: {r_d:+.2f} R (Kumulatif: {cum_r_wk:+.2f} R)")
+        daily_prog_str = "\n".join(daily_lines) if daily_lines else "Tanpa transaksi harian"
+
         prompt_text = f"""Anda adalah Master Institutional Smart Money Concepts (SMC) & ICT Elite Trading Mentor yang berpengalaman mengubah modal kecil menjadi portofolio besar secara konsisten.
 
-Berikan evaluasi audit kualitatif mingguan dan analisis teknikal chart yang sangat tajam, inspiratif, realistis, dan berorientasi pada pertumbuhan modal untuk trader berdasarkan data minggu ini ({start_date} s.d. {end_date}):
+Berikan evaluasi audit kualitatif mingguan, analisis teknikal chart, DAN analisis pertumbuhan ekuitas harian yang sangat tajam, inspiratif, realistis, dan berorientasi pada pertumbuhan modal untuk trader berdasarkan data minggu ini ({start_date} s.d. {end_date}):
 
 METRIK AUDIT MINGGUAN:
 - Total Posisi: {total_trades} transaksi
@@ -779,13 +898,16 @@ METRIK AUDIT MINGGUAN:
 - Kepatuhan Rencana Trading (Plan Adherence): {adherence_pct:.1f}%
 - Pola Emosi Dominan: {top_tags_str}
 - Dokumentasi Chart: {sc_pct}% trade memiliki foto chart (total {total_sc} foto terlampir minggu ini)
+- Pertumbuhan Ekuitas R Harian:
+{daily_prog_str}
 
-Formatkan audit mingguan dalam 5 bagian Markdown terstruktur khas Mentor SMC Senior:
+Formatkan audit mingguan dalam 6 bagian Markdown terstruktur khas Mentor SMC Senior:
 1. 📊 **Audit Performa Executive & Pertumbuhan Ekuitas R**
-2. 📈 **Analisis Teknikal Chart Mingguan & Kualitas Dokumentasi Visual**
-3. 🧠 **Review Psikologi, Kontrol Emosi & Kedisiplinan SMC**
-4. 🎯 **Analisis Efisiensi Order Flow & Eksekusi**
-5. 💡 **3 Instruksi Emas Mentor SMC untuk Scaling Akun Minggu Depan**
+2. 📉 **Pertumbuhan Ekuitas Akun Harian (Day-by-Day R Velocity)**
+3. 📈 **Analisis Teknikal Chart Mingguan & Kualitas Dokumentasi Visual**
+4. 🧠 **Review Psikologi, Kontrol Emosi & Kedisiplinan SMC**
+5. 🎯 **Analisis Efisiensi Order Flow & Eksekusi**
+6. 💡 **3 Instruksi Emas Mentor SMC untuk Scaling Akun Minggu Depan**
 
 Gunakan bahasa Indonesia yang tegas, bijak, profesional, mendalam, kaya terminologi SMC (Liquidity Sweeps, Discount/Premium, Order Block, FVG, 1R Risk), layaknya bimbingan privat dari mentor senior."""
 
@@ -804,6 +926,11 @@ Gunakan bahasa Indonesia yang tegas, bijak, profesional, mendalam, kaya terminol
 
 📊 **Audit Performa Executive & Pertumbuhan Ekuitas R**
 Minggu ini Anda telah menyelesaikan **{total_trades} posisi transaksi** dengan *Win Rate* **{win_rate:.1f}%**, menghasilkan pencapaian akumulasi **{r_sign}{total_r:.2f} R** ({pnl_sign}${total_pnl:.2f}). Kualitas eksekusi trading Anda pada periode ini dinilai **{status_eval}** dari kacamata ekspektasi matematis R-Multiple.
+
+📉 **Pertumbuhan Ekuitas Akun Harian (Day-by-Day R Velocity)**
+• Trajektori Pertumbuhan R Harian:
+{daily_prog_str}
+• *Prinsip Konsistensi*: Pertumbuhan ekuitas harian yang stabil lahir dari eksekusi setup berkualitas tanpa membiarkan 1 hari rugi memicu *revenge trading*.
 
 📈 **Analisis Teknikal Chart Mingguan & Kualitas Dokumentasi Visual**
 • Coverage Dokumentasi Chart Mingguan: **{sc_pct}%** ({len(trades_with_sc)} dari {total_trades} trade memiliki foto chart 4H/1H, total **{total_sc} foto** diunggah).
