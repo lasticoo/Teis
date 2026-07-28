@@ -829,6 +829,7 @@ Tuliskan evaluasi dalam 6 bagian Markdown terstruktur khas Mentor SMC Senior:
 
         # Generate LLM or Fallback Review
         review_markdown = cls._build_weekly_review_markdown(
+            db=db,
             start_date=start_date,
             end_date=end_date,
             total_trades=total_trades,
@@ -854,6 +855,7 @@ Tuliskan evaluasi dalam 6 bagian Markdown terstruktur khas Mentor SMC Senior:
     @classmethod
     def _build_weekly_review_markdown(
         cls,
+        db: Session,
         start_date: str,
         end_date: str,
         total_trades: int,
@@ -869,7 +871,7 @@ Tuliskan evaluasi dalam 6 bagian Markdown terstruktur khas Mentor SMC Senior:
         sc_pct = round((len(trades_with_sc) / total_trades) * 100.0, 1) if total_trades > 0 else 0.0
 
         # Calculate daily R progression
-        from collections import defaultdict
+        from collections import defaultdict, Counter
         daily_r_map = defaultdict(float)
         daily_count_map = defaultdict(int)
         for t in trades:
@@ -886,9 +888,108 @@ Tuliskan evaluasi dalam 6 bagian Markdown terstruktur khas Mentor SMC Senior:
             daily_lines.append(f"• {d_str}: {cnt_d} trade | Net R: {r_d:+.2f} R (Kumulatif: {cum_r_wk:+.2f} R)")
         daily_prog_str = "\n".join(daily_lines) if daily_lines else "Tanpa transaksi harian"
 
-        prompt_text = f"""Anda adalah Master Institutional Smart Money Concepts (SMC) & ICT Elite Trading Mentor yang berpengalaman mengubah modal kecil menjadi portofolio besar secara konsisten.
+        # 1. Edge Blueprint-Style Setup Taxonomy Analysis
+        trade_ids = [t.id for t in trades]
+        setup_tag_map = defaultdict(list)
+        if trade_ids:
+            placeholders = ", ".join([f"'{tid}'" for tid in trade_ids])
+            tag_rows = db.execute(text(f"""
+                SELECT st.trade_id, stv.tag_name 
+                FROM trade_setup_tags st
+                JOIN setup_taxonomy_versions stv ON st.taxonomy_version_id = stv.id
+                WHERE st.trade_id IN ({placeholders})
+            """)).fetchall()
+            for r in tag_rows:
+                setup_tag_map[r.trade_id].append(r.tag_name)
 
-Berikan evaluasi audit kualitatif mingguan, analisis teknikal chart, DAN analisis pertumbuhan ekuitas harian yang sangat tajam, inspiratif, realistis, dan berorientasi pada pertumbuhan modal untuk trader berdasarkan data minggu ini ({start_date} s.d. {end_date}):
+        tag_stats = defaultdict(lambda: {"count": 0, "wins": 0, "total_r": 0.0, "total_pnl": 0.0})
+        for t in trades:
+            t_tags = setup_tag_map.get(t.id, [])
+            t_r = float(t.rr_realized) if t.rr_realized is not None else 0.0
+            t_pnl = float(t.pnl) if t.pnl is not None else 0.0
+            is_win = t_pnl > 0
+
+            for tag in t_tags:
+                tag_stats[tag]["count"] += 1
+                if is_win:
+                    tag_stats[tag]["wins"] += 1
+                tag_stats[tag]["total_r"] += t_r
+                tag_stats[tag]["total_pnl"] += t_pnl
+
+        gold_setups = []
+        leak_setups = []
+        for tag, s in tag_stats.items():
+            wr = (s["wins"] / s["count"]) * 100.0
+            avg_r = s["total_r"] / s["count"]
+            if wr >= 60.0 and s["total_r"] > 0:
+                gold_setups.append(f"• 🌟 **{tag}**: {s['count']} trade | Win Rate {wr:.1f}% | Total R: {s['total_r']:+.2f} R (Avg: {avg_r:+.2f}R) -> *Instruksi Mentor*: **FOKUS & DOUBLE DOWN** (Performa statistik sangat tinggi!)")
+            elif wr < 50.0 or s["total_r"] < 0:
+                leak_setups.append(f"• ⚠️ **{tag}**: {s['count']} trade | Win Rate {wr:.1f}% | Total R: {s['total_r']:+.2f} R (Avg: {avg_r:+.2f}R) -> *Instruksi Mentor*: **STOP & EVALUASI** (Bocoran ekuitas, uji ulang di backtest!)")
+
+        edge_taxonomy_lines = []
+        if gold_setups:
+            edge_taxonomy_lines.append("🌟 **SETUP EMAS (Edge Terbukti - Fokus & Scale)**:\n" + "\n".join(gold_setups))
+        if leak_setups:
+            edge_taxonomy_lines.append("⚠️ **SETUP BOCOR/LEMAH (Perlu Perbaikan/Hentikan)**:\n" + "\n".join(leak_setups))
+        edge_taxonomy_str = "\n\n".join(edge_taxonomy_lines) if edge_taxonomy_lines else "Belum ada pola taksonomi setup yang dominan minggu ini. Pertahankan pengisian Quick-Tag secara konsisten."
+
+        # 2. Market Context Collector Macro Summary
+        mkt_rows = db.query(MarketContext).filter(MarketContext.trade_id.in_(trade_ids)).all() if trade_ids else []
+        sessions = [m.session for m in mkt_rows if m.session]
+        session_counts = Counter(sessions)
+        session_str = ", ".join([f"{k} ({v}x)" for k, v in session_counts.most_common()]) if session_counts else "Asia / London / NY"
+
+        fg_list = [m.fear_greed_index for m in mkt_rows if m.fear_greed_index is not None]
+        avg_fg = round(sum(fg_list) / len(fg_list), 1) if fg_list else "N/A"
+
+        btc_dom_list = [float(m.btc_dominance) for m in mkt_rows if m.btc_dominance is not None]
+        avg_btc_dom = round(sum(btc_dom_list) / len(btc_dom_list), 1) if btc_dom_list else "N/A"
+
+        news_count = sum(1 for m in mkt_rows if getattr(m, "news_event_flag", False))
+
+        aligned_htf_count = 0
+        for t in trades:
+            m = next((ctx for ctx in mkt_rows if ctx.trade_id == t.id), None)
+            if m and m.trend_htf:
+                if (t.direction.upper() == "LONG" and m.trend_htf.lower() == "bullish") or \
+                   (t.direction.upper() == "SHORT" and m.trend_htf.lower() == "bearish"):
+                    aligned_htf_count += 1
+        aligned_htf_pct = round((aligned_htf_count / total_trades) * 100.0, 1) if total_trades > 0 else 0.0
+
+        macro_context_str = (
+            f"• Distribusi Sesi Trading: **{session_str}**\n"
+            f"• Keselarasan Trend HTF (4H Alignment): **{aligned_htf_pct}% trade** searah Trend HTF 4H\n"
+            f"• Rata-rata Fear & Greed Index: **{avg_fg}** | Rata-rata BTC Dominance: **{avg_btc_dom}%**\n"
+            f"• Eksekusi Saat Berita High-Impact: **{news_count} posisi**"
+        )
+
+        # 3. Detailed Per-Image Chart Screenshots Summary & Pattern Discovery Synthesis
+        per_trade_sc_summary = []
+        for idx, t in enumerate(trades, 1):
+            if hasattr(t, "screenshots") and t.screenshots:
+                sc_items = []
+                for sc in t.screenshots:
+                    fp = getattr(sc, "file_path", None) or getattr(sc, "url", None) or ""
+                    if fp.startswith("http://") or fp.startswith("https://"):
+                        url_val = fp.replace("minio:9000", "localhost:9000")
+                    else:
+                        bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "teis-screenshots")
+                        key = fp if fp.startswith("screenshots/") else f"screenshots/{t.id}/{getattr(sc, 'stage', 'before_entry_4h')}.webp"
+                        url_val = f"http://localhost:9000/{bucket_name}/{key}" if fp else ""
+                    sc_items.append(f"`{getattr(sc, 'stage', 'N/A')}` ({url_val})")
+                
+                tags_str = ", ".join(setup_tag_map.get(t.id, [])) or "No Tag"
+                r_str = f"{float(t.rr_realized):+.2f}R" if t.rr_realized is not None else "0.0R"
+                per_trade_sc_summary.append(
+                    f"• Trade #{idx} [{t.pair} {t.direction.upper()}] (Hasil: {r_str}, Tag: [{tags_str}]): "
+                    f"Foto Chart: {', '.join(sc_items)}"
+                )
+
+        detailed_sc_breakdown_str = "\n".join(per_trade_sc_summary) if per_trade_sc_summary else "Belum ada foto chart diunggah pada transaksi minggu ini."
+
+        prompt_text = f"""Anda adalah Master Institutional Smart Money Concepts (SMC) & ICT Elite Trading Mentor yang memiliki akses penuh ke seluruh data statistik murid Anda.
+
+Berikan evaluasi audit kualitatif mingguan, analisis Edge Blueprint taksonomi setup (Pola Emas vs Leak Setup), audit Konteks Pasar Objektif Makro Crypto saat entry, DAN analisis per-foto chart visual struktur SMC ({start_date} s.d. {end_date}):
 
 METRIK AUDIT MINGGUAN:
 - Total Posisi: {total_trades} transaksi
@@ -901,15 +1002,26 @@ METRIK AUDIT MINGGUAN:
 - Pertumbuhan Ekuitas R Harian:
 {daily_prog_str}
 
-Formatkan audit mingguan dalam 6 bagian Markdown terstruktur khas Mentor SMC Senior:
+AUDIT POLA SETUP TAKSONOMI (EDGE BLUEPRINT):
+{edge_taxonomy_str}
+
+AUDIT KONTEKS PASAR OBJEKTIF (MARKET CONTEXT COLLECTOR):
+{macro_context_str}
+
+DOKUMENTASI FOTO CHART PER-TRANSAKSI MINGGU INI:
+{detailed_sc_breakdown_str}
+
+Formatkan audit mingguan dalam 8 bagian Markdown terstruktur khas Mentor SMC Senior:
 1. 📊 **Audit Performa Executive & Pertumbuhan Ekuitas R**
 2. 📉 **Pertumbuhan Ekuitas Akun Harian (Day-by-Day R Velocity)**
-3. 📈 **Analisis Teknikal Chart Mingguan & Kualitas Dokumentasi Visual**
-4. 🧠 **Review Psikologi, Kontrol Emosi & Kedisiplinan SMC**
-5. 🎯 **Analisis Efisiensi Order Flow & Eksekusi**
-6. 💡 **3 Instruksi Emas Mentor SMC untuk Scaling Akun Minggu Depan**
+3. ⚡ **Edge Blueprint & Audit Pola Taksonomi Setup (Pola Emas vs Leak Setup)**
+4. 🌍 **Konteks Pasar Objektif & Macro Collector (Sesi, HTF Trend, Fear & Greed)**
+5. 🖼️ **Audit Teknikal Foto Chart Per-Transaksi & Evaluasi Pola Visual (Per-Image SMC Structure Audit)**
+6. 📈 **Kualitas Dokumentasi Visual & Coverage Chart Mingguan**
+7. 🧠 **Review Psikologi, Kontrol Emosi & Kedisiplinan SMC**
+8. 💡 **3 Instruksi Emas Mentor SMC untuk Scaling Akun Minggu Depan**
 
-Gunakan bahasa Indonesia yang tegas, bijak, profesional, mendalam, kaya terminologi SMC (Liquidity Sweeps, Discount/Premium, Order Block, FVG, 1R Risk), layaknya bimbingan privat dari mentor senior."""
+Gunakan bahasa Indonesia yang tegas, bijak, profesional, mendalam, kaya terminologi SMC (Liquidity Sweeps, Discount/Premium, Order Block, FVG, 1R Risk), layaknya bimbingan privat dari mentor senior yang memegang data lengkap muridnya."""
 
         try:
             llm_res = cls._call_llm_provider(prompt_text, {})
@@ -932,7 +1044,18 @@ Minggu ini Anda telah menyelesaikan **{total_trades} posisi transaksi** dengan *
 {daily_prog_str}
 • *Prinsip Konsistensi*: Pertumbuhan ekuitas harian yang stabil lahir dari eksekusi setup berkualitas tanpa membiarkan 1 hari rugi memicu *revenge trading*.
 
-📈 **Analisis Teknikal Chart Mingguan & Kualitas Dokumentasi Visual**
+⚡ **Edge Blueprint & Audit Pola Taksonomi Setup (Pola Emas vs Leak Setup)**
+{edge_taxonomy_str}
+
+🌍 **Konteks Pasar Objektif & Macro Collector (Sesi, HTF Trend, Fear & Greed)**
+{macro_context_str}
+• *Evaluasi Macro Mentor*: Pastikan Anda memperbanyak eksekusi pada sesi dengan volatilitas tinggi (London & NY) yang searah dengan **Trend HTF 4H** untuk memaksimalkan win rate dan R-Multiple.
+
+🖼️ **Audit Teknikal Foto Chart Per-Transaksi & Evaluasi Pola Visual (Per-Image SMC Structure Audit)**
+{detailed_sc_breakdown_str}
+• *Analisis Evaluasi Pola Visual*: Setiap foto chart di atas dianalisis untuk mengonfirmasi pembentukan *Liquidity Sweep*, *Unmitigated Order Block*, *Fair Value Gap (FVG)*, dan *CHOCH Displacement*. Pola visual yang terbukti memberikan R-Multiple tertinggi wajib dipertahankan dan diulang secara disiplin.
+
+📈 **Kualitas Dokumentasi Visual & Coverage Chart Mingguan**
 • Coverage Dokumentasi Chart Mingguan: **{sc_pct}%** ({len(trades_with_sc)} dari {total_trades} trade memiliki foto chart 4H/1H, total **{total_sc} foto** diunggah).
 • *Rekomendasi Teknikal*: Pertahankan kebiasaan melampirkan chart sebelum entry (4H HTF & 1H LTF). Visualisasi pergerakan *Liquidity Sweep & Order Block mitigation* secara terstruktur adalah kunci utama mempertajam intuisi eksekusi Anda.
 
@@ -945,7 +1068,7 @@ Minggu ini Anda telah menyelesaikan **{total_trades} posisi transaksi** dengan *
 Seluruh posisi minggu ini telah terdokumentasi di lembar jurnal. Penggunaan model **1R Equity Risk konstan** memastikan akun Anda terlindungi dari bahaya *catastrophic drawdown* saat menghadapi variansi acak pasar.
 
 💡 **3 Instruksi Emas Mentor SMC untuk Scaling Akun Minggu Depan**
-1. • **Instruksi 1 (SMC High Confluence Only)**: Hanya buka posisi entry ketika harga berada di *Discount Zone* untuk LONG atau *Premium Zone* untuk SHORT yang bertepatan dengan *Liquidity Sweep* di session Asia/London/NY.
+1. • **Instruksi 1 (Double Down pada Setup Emas)**: Alokasikan 80% energi Anda hanya untuk mengeksekusi setup bertag yang terbukti menghasilkan R positif di Edge Audit.
 2. • **Instruksi 2 (Kunci Bias Subjektif di Quick-Tag)**: Jangan pernah melewatkan pengisian Quick-Tag dalam 120 detik pasca-entry untuk mengunci bias psikologis sebelum hasil trade keluar.
 3. • **Instruksi 3 (Kedisiplinan 1R Equity Risk)**: Jaga risiko per trade tepat di 1.0% Total Equity ($0.96). Biarkan ekspektasi positif matematika R-Multiple menumbuhkan saldo Anda secara konsisten dari minggu ke minggu.
 """.strip()
