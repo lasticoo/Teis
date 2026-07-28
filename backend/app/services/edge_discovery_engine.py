@@ -81,6 +81,7 @@ class EdgeDiscoveryEngine:
             "overall_mean_expectancy_r": round(overall_mean, 4),
             "std_deviation": round(overall_std, 4),
             "coefficient_of_variation": cv,
+            "cv": cv,
             "threshold": cls.STABILITY_MAX_CV,
             "all_periods_positive": all_positive,
             "passed": is_stable
@@ -92,7 +93,7 @@ class EdgeDiscoveryEngine:
     def _evaluate_repeatability(
         cls,
         trades_sorted: List[Dict[str, Any]],
-        db: Session
+        db: Optional[Session] = None
     ) -> Tuple[Optional[bool], Optional[Dict[str, Any]]]:
         """
         Sub-Test B: Uji Keberulangan (Repeatable)
@@ -102,31 +103,32 @@ class EdgeDiscoveryEngine:
         if not trades_sorted:
             return None, None
 
-        trade_ids = [t["id"] for t in trades_sorted]
-        if not trade_ids:
-            return None, None
-
-        placeholders = ", ".join([f"'{tid}'" for tid in trade_ids])
-        sql = f"""
-            SELECT t.id, t.pair, t.entry_time, mc.session
-            FROM trades t
-            LEFT JOIN market_context mc ON t.id = mc.trade_id
-            WHERE t.id IN ({placeholders})
-        """
-        rows = db.execute(text(sql)).fetchall()
-        meta_map = {r.id: {"pair": r.pair, "entry_time": r.entry_time, "session": r.session} for r in rows}
+        meta_map = {}
+        if db is not None:
+            trade_ids = [t["id"] for t in trades_sorted]
+            if trade_ids:
+                placeholders = ", ".join([f"'{tid}'" for tid in trade_ids])
+                sql = f"""
+                    SELECT t.id, t.pair, t.entry_time, mc.session
+                    FROM trades t
+                    LEFT JOIN market_context mc ON t.id = mc.trade_id
+                    WHERE t.id IN ({placeholders})
+                """
+                rows = db.execute(text(sql)).fetchall()
+                meta_map = {r.id: {"pair": r.pair, "entry_time": r.entry_time, "session": r.session} for r in rows}
 
         trade_records = []
         for t in trades_sorted:
-            m = meta_map.get(t["id"], {})
+            m = meta_map.get(t.get("id"), {})
             e_time = m.get("entry_time") or t.get("entry_time")
-            month_str = e_time.strftime("%Y-%m") if e_time else "N/A"
+            month_str = e_time.strftime("%Y-%m") if (e_time and hasattr(e_time, 'strftime')) else "N/A"
+            r_val = t.get("r_realized", t.get("rr_realized", 0.0))
             trade_records.append({
-                "id": t["id"],
-                "r_realized": t["r_realized"],
-                "pair": m.get("pair") or "N/A",
+                "id": t.get("id"),
+                "r_realized": float(r_val),
+                "pair": m.get("pair") or t.get("pair") or "N/A",
                 "month": month_str,
-                "session": m.get("session") or "N/A"
+                "session": m.get("session") or t.get("session") or "N/A"
             })
 
         dimensions_res = {}
@@ -139,52 +141,47 @@ class EdgeDiscoveryEngine:
                 grp[tr[dim_key]].append(tr["r_realized"])
 
             subgroups_info = []
-            valid_subgroups_count = 0
-            positive_subgroups_count = 0
+            valid_means = []
 
-            for group_val, r_vals in grp.items():
-                if group_val == "N/A":
-                    continue
-                n_grp = len(r_vals)
-                exp_grp = float(np.mean(r_vals)) if r_vals else 0.0
-                is_val = n_grp >= cls.REPEATABILITY_MIN_SUBGROUP_N
-                is_pos = exp_grp > 0
-
+            for key_val, r_list in grp.items():
+                n_sub = len(r_list)
+                exp_sub = float(np.mean(r_list))
+                is_val = n_sub >= cls.REPEATABILITY_MIN_SUBGROUP_N
                 if is_val:
-                    valid_subgroups_count += 1
-                    if is_pos:
-                        positive_subgroups_count += 1
-
+                    valid_means.append(exp_sub)
                 subgroups_info.append({
-                    "name": str(group_val),
-                    "n": n_grp,
-                    "expectancy_r": round(exp_grp, 4),
-                    "is_valid_sample": is_val,
-                    "is_positive": is_pos
+                    "subgroup": key_val,
+                    "n": n_sub,
+                    "expectancy_r": round(exp_sub, 4),
+                    "is_valid_sample": is_val
                 })
 
-            if valid_subgroups_count >= 2:
-                dim_passed = (positive_subgroups_count / valid_subgroups_count) > 0.50
-                evaluable_dims_passed.append(dim_passed)
-                status_desc = "passed" if dim_passed else "failed"
+            n_valid = len(valid_means)
+            if n_valid > 0:
+                n_pos = sum(1 for m in valid_means if m > 0)
+                pct_pos = (n_pos / n_valid) * 100.0
+                dim_pass = pct_pos >= 50.0
+                evaluable_dims_passed.append(dim_pass)
             else:
-                dim_passed = True
-                status_desc = "skipped_insufficient_coverage"
+                pct_pos = 0.0
+                dim_pass = False
 
             dimensions_res[dim_key] = {
                 "total_subgroups": len(grp),
-                "valid_subgroups": valid_subgroups_count,
-                "positive_subgroups": positive_subgroups_count,
-                "passed": dim_passed,
-                "status": status_desc,
+                "valid_subgroups": n_valid,
+                "positive_subgroups": sum(1 for m in valid_means if m > 0) if n_valid > 0 else 0,
+                "pct_positive": round(pct_pos, 1),
+                "passed": dim_pass,
                 "subgroups": subgroups_info
             }
 
-        is_repeatable = all(evaluable_dims_passed) if evaluable_dims_passed else True
+        is_repeatable = all(evaluable_dims_passed) if evaluable_dims_passed else False
 
         repeatability_detail = {
             "dimensions": dimensions_res,
             "evaluable_dimensions_count": len(evaluable_dims_passed),
+            "pct_positive_subgroups": round(np.mean([d["pct_positive"] for d in dimensions_res.values()]), 1) if dimensions_res else 0.0,
+            "valid_subgroups": sum([d["valid_subgroups"] for d in dimensions_res.values()]),
             "passed": is_repeatable
         }
 
@@ -194,38 +191,43 @@ class EdgeDiscoveryEngine:
     def _evaluate_robustness(
         cls,
         trades_sorted: List[Dict[str, Any]],
-        db: Session
+        db: Optional[Session] = None
     ) -> Tuple[Optional[bool], Optional[Dict[str, Any]]]:
         """
-        Sub-Test C: Uji Robustness (Simple Mode)
+        Sub-Test C: Uji Robustness (Simple Mode / Price Action Mode)
         Simulates 8 TP/SL shift scenarios (+/- 5% and +/- 10%).
         Checks if expectancy R remains > 0 in all 8 scenarios and maximum expectancy drop <= ROBUSTNESS_MAX_DROP_PCT.
         """
         if not trades_sorted:
             return None, None
 
-        trade_ids = [t["id"] for t in trades_sorted]
-        if not trade_ids:
-            return None, None
-
-        placeholders = ", ".join([f"'{tid}'" for tid in trade_ids])
-        sql = f"""
-            SELECT t.id, t.entry_price, t.stop_loss, t.take_profit, t.margin, t.direction, tex.exit_reason
-            FROM trades t
-            LEFT JOIN trade_execution tex ON t.id = tex.trade_id
-            WHERE t.id IN ({placeholders})
-        """
-        rows = db.execute(text(sql)).fetchall()
-        exec_map = {
-            r.id: {
-                "entry_price": float(r.entry_price) if r.entry_price is not None else None,
-                "stop_loss": float(r.stop_loss) if r.stop_loss is not None else None,
-                "take_profit": float(r.take_profit) if r.take_profit is not None else None,
-                "exit_reason": r.exit_reason,
-                "direction": r.direction
-            }
-            for r in rows
-        }
+        exec_map = {}
+        if db is not None:
+            trade_ids = [t["id"] for t in trades_sorted]
+            if trade_ids:
+                placeholders = ", ".join([f"'{tid}'" for tid in trade_ids])
+                sql = f"""
+                    SELECT t.id, t.entry_price, t.stop_loss, t.take_profit, t.margin, t.direction, tex.exit_reason, t.mfe_price, t.mae_price
+                    FROM trades t
+                    LEFT JOIN trade_execution tex ON t.id = tex.trade_id
+                    WHERE t.id IN ({placeholders})
+                """
+                try:
+                    rows = db.execute(text(sql)).fetchall()
+                    exec_map = {
+                        r.id: {
+                            "entry_price": float(r.entry_price) if r.entry_price else None,
+                            "stop_loss": float(r.stop_loss) if r.stop_loss else None,
+                            "take_profit": float(r.take_profit) if r.take_profit else None,
+                            "exit_reason": r.exit_reason,
+                            "direction": r.direction,
+                            "mfe_price": float(r.mfe_price) if getattr(r, 'mfe_price', None) else None,
+                            "mae_price": float(r.mae_price) if getattr(r, 'mae_price', None) else None
+                        }
+                        for r in rows
+                    }
+                except Exception:
+                    pass
 
         shift_scenarios = [
             ("TP -5%", "TP", -0.05),
@@ -238,7 +240,7 @@ class EdgeDiscoveryEngine:
             ("SL +10%", "SL", 0.10),
         ]
 
-        orig_r_list = [t["r_realized"] for t in trades_sorted]
+        orig_r_list = [float(t.get("r_realized", t.get("rr_realized", 0.0))) for t in trades_sorted]
         orig_expectancy = float(np.mean(orig_r_list)) if orig_r_list else 0.0
 
         excluded_count = 0
@@ -250,9 +252,9 @@ class EdgeDiscoveryEngine:
         for sc_name, target_param, pct in shift_scenarios:
             shifted_r_list = []
             for t in trades_sorted:
-                m = exec_map.get(t["id"], {})
-                r_orig = t["r_realized"]
-                exit_reason = m.get("exit_reason")
+                m = exec_map.get(t.get("id"), {})
+                r_orig = float(t.get("r_realized", t.get("rr_realized", 0.0)))
+                exit_reason = m.get("exit_reason") or t.get("exit_reason")
                 entry_p = m.get("entry_price")
                 sl_p = m.get("stop_loss")
                 tp_p = m.get("take_profit")
@@ -316,12 +318,35 @@ class EdgeDiscoveryEngine:
             "excluded_count": excluded_count,
             "low_confidence": low_confidence,
             "scenarios": scenarios_results,
+            "all_scenarios_positive": all_scenarios_positive,
             "max_drop_pct": round(max_drop_pct, 4),
             "threshold": cls.ROBUSTNESS_MAX_DROP_PCT,
             "passed": is_robust
         }
 
         return is_robust, robustness_detail
+
+    @classmethod
+    def _calculate_bootstrap_metrics(cls, r_vals: np.ndarray, n_iterations: int = 10000) -> Tuple[float, float, float, float]:
+        """
+        Calculates mean expectancy, 95% Bootstrap Confidence Interval, and 1-sample t-test p-value for R-multiples.
+        Returns: (mean_exp, ci_lower, ci_upper, p_value)
+        """
+        if len(r_vals) == 0:
+            return 0.0, 0.0, 0.0, 1.0
+
+        mean_exp = float(np.mean(r_vals))
+        matrix = np.random.choice(r_vals, size=(n_iterations, len(r_vals)), replace=True)
+        boot_means = matrix.mean(axis=1)
+        ci_lower = float(np.percentile(boot_means, 2.5))
+        ci_upper = float(np.percentile(boot_means, 97.5))
+
+        from scipy import stats
+        t_stat, p_val = stats.ttest_1samp(r_vals, popmean=0.0)
+        p_val = float(p_val / 2.0) if t_stat > 0 else 1.0 - float(p_val / 2.0)
+        p_val = max(0.0001, min(1.0, float(p_val)))
+
+        return mean_exp, ci_lower, ci_upper, p_val
 
     @classmethod
     def run_discovery(cls, db: Session) -> Dict[str, Any]:

@@ -12,6 +12,7 @@ import Dashboard from "./pages/Dashboard";
 import EdgeExplorer from "./pages/EdgeExplorer";
 import EdgeDetail from "./pages/EdgeDetail";
 import WeeklyReview from "./pages/WeeklyReview";
+import CriteriaReview from "./pages/CriteriaReview";
 import TopHeader from "./components/TopHeader";
 import Sidebar from "./components/Sidebar";
 
@@ -150,6 +151,17 @@ function AppContent() {
         }
       />
 
+
+      <Route
+        path="/edges/criteria-review"
+        element={
+          <ProtectedRoute>
+            <ProtectedLayout>
+              <CriteriaReview />
+            </ProtectedLayout>
+          </ProtectedRoute>
+        }
+      />
 
       <Route
         path="/import"

@@ -13,7 +13,10 @@ from app.tasks.notification_tasks import (
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_TYPES = ["trade_pending_tag", "edge_status_change", "sync_failure"]
+ALLOWED_TYPES = [
+    "trade_pending_tag", "edge_status_change", "sync_failure",
+    "backup_success", "backup_failure", "restore_drill_reminder"
+]
 ALLOWED_CHANNELS = ["in_app", "web_push", "email"]
 
 

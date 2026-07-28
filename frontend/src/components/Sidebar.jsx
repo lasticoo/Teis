@@ -12,6 +12,7 @@ const Sidebar = () => {
     { path: "/quick-tag", label: "Quick-Tag", icon: "🏷️" },
     { path: "/journal", label: "Jurnal Trade", icon: "📘" },
     { path: "/edges", label: "Edge Blueprint", icon: "🎯" },
+    { path: "/edges/criteria-review", label: "Evaluasi Ambang Edge", icon: "📐" },
     { path: "/review", label: "Review Mingguan", icon: "🖼️" },
     { path: "/import", label: "Import Wizard", icon: "📥" },
     { path: "/settings", label: "Pengaturan", icon: "⚙️" },

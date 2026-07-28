@@ -60,6 +60,18 @@ celery_app.conf.beat_schedule = {
     "monitor_edge_status_daily": {
         "task": "tasks.monitor_edge_status",
         "schedule": crontab(minute=30, hour=2),  # Every day at 02:30 AM WIB
+    },
+    "run_daily_backup_daily": {
+        "task": "tasks.run_daily_backup",
+        "schedule": crontab(minute=0, hour=3),  # Every day at 03:00 AM WIB
+    },
+    "run_weekly_export_weekly": {
+        "task": "tasks.run_weekly_export",
+        "schedule": crontab(minute=0, hour=3, day_of_week='sun'),  # Every Sunday at 03:00 AM WIB
+    },
+    "remind_restore_drill_monthly": {
+        "task": "tasks.remind_restore_drill",
+        "schedule": crontab(minute=0, hour=9, day_of_month='1'),  # 1st of every month at 09:00 AM WIB
     }
 }
 
@@ -652,5 +664,106 @@ def detect_account_transfers_task():
     except Exception as e:
         logger.error(f"Error in detect_account_transfers task: {str(e)}")
         return {"status": "failed", "error": str(e)}
+    finally:
+        db.close()
+
+
+from app.services.backup_service import BackupService
+
+@celery_app.task(name="tasks.run_daily_backup")
+def run_daily_backup_task():
+    logger.info("Executing periodic run_daily_backup task...")
+    db = SessionLocal()
+    try:
+        rec = BackupService.run_daily_backup(db)
+        deleted = BackupService.cleanup_old_backups(db, days=30)
+        return {"status": rec.status, "backup_id": rec.id, "cleaned_files": deleted}
+    except Exception as e:
+        logger.error(f"Error in run_daily_backup task: {str(e)}")
+        return {"status": "failed", "error": str(e)}
+    finally:
+        db.close()
+
+
+@celery_app.task(name="tasks.run_weekly_export")
+def run_weekly_export_task():
+    logger.info("Executing periodic run_weekly_export task...")
+    db = SessionLocal()
+    try:
+        rec = BackupService.run_weekly_export(db)
+        return {"status": rec.status, "export_id": rec.id}
+    except Exception as e:
+        logger.error(f"Error in run_weekly_export task: {str(e)}")
+        return {"status": "failed", "error": str(e)}
+    finally:
+        db.close()
+
+
+@celery_app.task(name="tasks.remind_restore_drill")
+def remind_restore_drill_task():
+    logger.info("Executing periodic remind_restore_drill task...")
+    db = SessionLocal()
+    try:
+        notif = BackupService.remind_restore_drill(db)
+        return {"status": "success", "notification_sent": bool(notif)}
+    except Exception as e:
+        logger.error(f"Error in remind_restore_drill task: {str(e)}")
+        return {"status": "failed", "error": str(e)}
+    finally:
+        db.close()
+
+
+@celery_app.task(name="tasks.capture_mfe_mae")
+def capture_mfe_mae_task(trade_id: str):
+    """
+    Background task to fetch 1-minute klines from Binance between entry_time and exit_time,
+    calculating exact MFE and MAE prices for accurate price-action robustness evaluation.
+    """
+    logger.info(f"Executing capture_mfe_mae task for trade {trade_id}...")
+    db = SessionLocal()
+    try:
+        trade = db.query(Trade).filter(Trade.id == trade_id).first()
+        if not trade or not trade.entry_time or not trade.exit_time:
+            return {"status": "skipped", "reason": "Trade or exit_time missing"}
+
+        start_ts = int(trade.entry_time.timestamp() * 1000)
+        end_ts = int(trade.exit_time.timestamp() * 1000)
+
+        # Call Binance 1m klines API
+        import requests
+        url = "https://fapi.binance.com/fapi/v1/klines"
+        params = {
+            "symbol": trade.pair.upper(),
+            "interval": "1m",
+            "startTime": start_ts,
+            "endTime": end_ts,
+            "limit": 1500
+        }
+        res = requests.get(url, params=params, timeout=10)
+        if res.status_code == 200:
+            klines = res.json()
+            if klines:
+                highs = [float(k[2]) for k in klines]
+                lows = [float(k[3]) for k in klines]
+                max_high = max(highs)
+                min_low = min(lows)
+
+                if trade.direction == "LONG":
+                    trade.mfe_price = Decimal(str(max_high))
+                    trade.mae_price = Decimal(str(min_low))
+                else:
+                    trade.mfe_price = Decimal(str(min_low))
+                    trade.mae_price = Decimal(str(max_high))
+
+                db.commit()
+                logger.info(f"✅ MFE/MAE captured for trade {trade_id}: MFE={trade.mfe_price}, MAE={trade.mae_price}")
+                return {"status": "success", "mfe": float(trade.mfe_price), "mae": float(trade.mae_price)}
+
+        return {"status": "failed", "reason": "Binance API call returned no klines"}
+
+    except Exception as e:
+        logger.error(f"Error in capture_mfe_mae task for trade {trade_id}: {e}")
+        db.rollback()
+        return {"status": "error", "message": str(e)}
     finally:
         db.close()

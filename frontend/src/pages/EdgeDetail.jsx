@@ -291,8 +291,11 @@ const EdgeDetail = () => {
                       ))}
                     </tbody>
                   </table>
-                  <div style={{ fontSize: "10px", color: "#94a3b8", marginTop: "6px", fontStyle: "italic" }}>
-                    * Catatan: Simulasi Simple Mode menggeser target berdasarkan exit_reason. Excluded: {edge.robustness_detail.excluded_count} trade.
+                  <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "8px", fontStyle: "italic", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span>* Simulasi shift TP/SL ±5% & ±10% terhadap baseline. Excluded: {edge.robustness_detail.excluded_count ?? 0} trade.</span>
+                    <span style={{ backgroundColor: "rgba(168, 85, 247, 0.15)", border: "1px solid rgba(168, 85, 247, 0.3)", color: "#c084fc", padding: "2px 6px", borderRadius: "4px", fontWeight: "600" }}>
+                      {edge.robustness_detail.mode === "price_action" ? "✅ Akurat (Price Action MFE/MAE)" : "🏷️ Estimasi (Simple Mode Fallback)"}
+                    </span>
                   </div>
                 </div>
               )}

@@ -11,6 +11,59 @@ from app.services.edge_status_monitor import EdgeStatusMonitor
 router = APIRouter(prefix="/edges", tags=["Edge Discovery Engine"])
 
 
+@router.get("/criteria-report")
+def get_criteria_report(db: Session = Depends(get_db)):
+    """
+    Returns raw stability (CV), repeatability (subgroups), and robustness (max_drop_pct)
+    metrics for edge blueprints with sample size >= 30, sorted by closeness to threshold bounds.
+    """
+    blueprints = db.query(EdgeBlueprint).filter(EdgeBlueprint.sample_size >= 30).all()
+    
+    report_list = []
+    for bp in blueprints:
+        stab_detail = bp.stability_detail or {}
+        rep_detail = bp.repeatability_detail or {}
+        rob_detail = bp.robustness_detail or {}
+
+        cv_val = stab_detail.get("cv") or stab_detail.get("coefficient_of_variation") or 0.0
+        pct_subgroups = rep_detail.get("pct_positive_subgroups", 0.0)
+        max_drop = rob_detail.get("max_drop_pct", 0.0)
+
+        borderline_score = abs(0.75 - float(cv_val)) + abs(50.0 - float(max_drop))
+
+        report_list.append({
+            "id": bp.id,
+            "name": bp.name,
+            "setup_combination": bp.setup_combination,
+            "sample_size": bp.sample_size,
+            "status": bp.status,
+            "expectancy_r": float(bp.expectancy_r) if bp.expectancy_r else 0.0,
+            "is_stable": bp.is_stable,
+            "is_repeatable": bp.is_repeatable,
+            "is_robust": bp.is_robust,
+            "stability_cv": round(float(cv_val), 4),
+            "stability_threshold": 0.75,
+            "repeatability_valid_subgroups": rep_detail.get("valid_subgroups", 0),
+            "repeatability_pct_positive": pct_subgroups,
+            "robustness_max_drop_pct": round(float(max_drop), 2),
+            "robustness_threshold_max_drop": 50.0,
+            "borderline_score": round(borderline_score, 4),
+            "evaluated_at": bp.criteria_evaluated_at.isoformat() if bp.criteria_evaluated_at else None
+        })
+
+    report_list.sort(key=lambda x: x["borderline_score"])
+    
+    return {
+        "total_evaluated_edges": len(report_list),
+        "thresholds": {
+            "STABILITY_MAX_CV": 0.75,
+            "REPEATABILITY_MIN_SUBGROUP_N": 5,
+            "ROBUSTNESS_MAX_DROP_PCT": 50.0
+        },
+        "edges": report_list
+    }
+
+
 @router.get("/blueprints")
 def get_edge_blueprints(
     status_filter: Optional[str] = Query(None, alias="status"),

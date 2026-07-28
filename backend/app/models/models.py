@@ -7,6 +7,7 @@ from sqlalchemy import (
     Numeric,
     DateTime,
     Integer,
+    BigInteger,
     CHAR,
     ForeignKey,
     Boolean,
@@ -48,6 +49,8 @@ class Trade(Base):
     holding_time_sec = Column(Integer, FetchedValue())
     
     data_source = Column(Enum('manual', 'binance_sync', 'historical_import'), nullable=False)
+    mfe_price = Column(Numeric(20, 8), nullable=True)
+    mae_price = Column(Numeric(20, 8), nullable=True)
     locked_at = Column(DateTime(timezone=False), nullable=True)
     created_at = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
 
@@ -262,12 +265,25 @@ class SystemNotification(Base):
     )
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
-    type = Column(Enum('trade_pending_tag', 'edge_status_change', 'sync_failure'), nullable=False)
+    type = Column(Enum('trade_pending_tag', 'edge_status_change', 'sync_failure', 'backup_success', 'backup_failure', 'restore_drill_reminder'), nullable=False)
     reference_id = Column(String(36), nullable=True)  # trade_id or edge_blueprint_id
     channel = Column(Enum('in_app', 'web_push', 'email'), nullable=False)
     message = Column(Text, nullable=False)
     sent_at = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
     acknowledged_at = Column(DateTime(timezone=False), nullable=True)
+
+
+class BackupHistory(Base):
+    __tablename__ = 'backup_history'
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    backup_type = Column(Enum('daily_sql', 'weekly_export'), nullable=False)
+    status = Column(Enum('success', 'failed'), nullable=False)
+    file_path_local = Column(String(500), nullable=True)
+    file_path_remote = Column(String(500), nullable=True)
+    file_size_bytes = Column(BigInteger, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
 
 
 class EquitySnapshot(Base):

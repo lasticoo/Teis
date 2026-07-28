@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     MINIO_ACCESS_KEY: str = Field(default="teis_minio_admin")
     MINIO_SECRET_KEY: str = Field(default="teis_minio_secret_pass")
     MINIO_BUCKET_NAME: str = Field(default="teis-screenshots")
+    BACKUP_MINIO_BUCKET: str = Field(default="teis-backups")
+    BACKUP_LOCAL_PATH: str = Field(default="/backups")
 
     # Security
     SECRET_KEY: str = Field(default="teis_super_secret_dev_key_1234567890")
