@@ -11,6 +11,7 @@ const Settings = () => {
   const [savingEmail, setSavingEmail] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [downloadingBackup, setDownloadingBackup] = useState(false);
   const [message, setMessage] = useState({ text: "", type: "" });
   const [showKeys, setShowKeys] = useState(false);
 
@@ -18,6 +19,46 @@ const Settings = () => {
     fetchKeyStatus();
     fetchProfile();
   }, []);
+
+  const handleDownloadBackup = async () => {
+    setDownloadingBackup(true);
+    setMessage({ text: "", type: "" });
+    try {
+      const response = await fetch(`${API_URL}/backup/download`, {
+        headers: getAuthHeader(),
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.detail || "Gagal mengunduh backup database.");
+      }
+
+      const blob = await response.blob();
+      const contentDisposition = response.headers.get("Content-Disposition");
+      let filename = `teis_backup_${new Date().toISOString().slice(0, 10)}.sql`;
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename="?([^"]+)"?/);
+        if (match && match[1]) {
+          filename = match[1];
+        }
+      }
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+
+      setMessage({ text: `✅ Berkas backup '${filename}' berhasil diunduh ke komputer Anda!`, type: "success" });
+    } catch (err) {
+      setMessage({ text: err.message || "Gagal mengunduh backup database.", type: "error" });
+    } finally {
+      setDownloadingBackup(false);
+    }
+  };
 
   const fetchProfile = async () => {
     try {
@@ -212,6 +253,29 @@ const Settings = () => {
               {saving ? "Menyimpan..." : "Simpan Kunci API"}
             </button>
           </form>
+        </div>
+
+        {/* Section 3: Backup Data Database Manual (.sql) */}
+        <div style={{ ...styles.sectionCard, marginTop: "30px" }}>
+          <div style={styles.sectionHeader}>
+            <h2 style={styles.sectionTitle}>💾 Backup Data Database Manual (.sql)</h2>
+            <div style={styles.statusBadgeSynced}>
+              Siap Backup
+            </div>
+          </div>
+
+          <p style={styles.infoText}>
+            Unduh seluruh salinan data transaksi, jurnal, cetak biru edge, dan pengaturan Anda dalam format berkas <strong>.SQL standar MySQL</strong>. Berkas ini dapat digunakan untuk pengarsipan manual pribadi atau pemulihan data (restore) agar data Anda tidak pernah hilang.
+          </p>
+
+          <button
+            type="button"
+            onClick={handleDownloadBackup}
+            disabled={downloadingBackup}
+            style={{ ...styles.button, backgroundColor: "#7c3aed", borderColor: "#8b5cf6", marginTop: "12px" }}
+          >
+            {downloadingBackup ? "📦 Menggenerasi Berkas .SQL..." : "📥 Download Backup Database (.sql)"}
+          </button>
         </div>
 
 
