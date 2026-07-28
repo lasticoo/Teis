@@ -248,49 +248,142 @@ class EdgeDiscoveryEngine:
         scenarios_results = []
         all_scenarios_positive = True
         max_drop_pct = 0.0
+        price_action_count = 0
+        simple_mode_fallback_count = 0
+        pa_counted = False  # count mode per-trade only once (on first scenario)
 
-        for sc_name, target_param, pct in shift_scenarios:
+        for sc_idx, (sc_name, target_param, pct) in enumerate(shift_scenarios):
             shifted_r_list = []
             for t in trades_sorted:
                 m = exec_map.get(t.get("id"), {})
                 r_orig = float(t.get("r_realized", t.get("rr_realized", 0.0)))
                 exit_reason = m.get("exit_reason") or t.get("exit_reason")
-                entry_p = m.get("entry_price")
-                sl_p = m.get("stop_loss")
-                tp_p = m.get("take_profit")
+                # Fall back to trade dict when exec_map has no data (no DB session or no row)
+                entry_p = m.get("entry_price") or t.get("entry_price")
+                sl_p = m.get("stop_loss") or t.get("stop_loss")
+                tp_p = m.get("take_profit") or t.get("take_profit")
+                mfe_raw = m.get("mfe_price") if m.get("mfe_price") is not None else t.get("mfe_price")
+                mae_raw = m.get("mae_price") if m.get("mae_price") is not None else t.get("mae_price")
+                mfe = float(mfe_raw) if mfe_raw is not None else None
+                mae = float(mae_raw) if mae_raw is not None else None
+                if entry_p is not None:
+                    entry_p = float(entry_p)
+                if sl_p is not None:
+                    sl_p = float(sl_p)
+                if tp_p is not None:
+                    tp_p = float(tp_p)
+                direction = (m.get("direction") or t.get("direction") or "LONG").upper()
 
                 if exit_reason in ("manual_close", "breakeven"):
                     shifted_r_list.append(r_orig)
-                    if sc_name == "TP -5%":
+                    if sc_idx == 0:
                         manual_or_be_count += 1
+                        simple_mode_fallback_count += 1
                     continue
 
                 if not entry_p or not sl_p or abs(entry_p - sl_p) == 0:
                     shifted_r_list.append(r_orig)
-                    if sc_name == "TP -5%":
+                    if sc_idx == 0:
                         excluded_count += 1
+                        simple_mode_fallback_count += 1
                     continue
 
                 risk_dist = abs(entry_p - sl_p)
 
-                if exit_reason == "take_profit":
-                    if target_param == "TP" and tp_p:
-                        orig_tp_dist = abs(tp_p - entry_p)
-                        new_tp_dist = orig_tp_dist * (1.0 + pct)
-                        r_shifted = new_tp_dist / risk_dist
+                # ── Price-Action Mode ──────────────────────────────────────────
+                # Use MFE/MAE when available. For LONG: MFE=max_high, MAE=min_low.
+                # For SHORT: MFE=min_low (best price), MAE=max_high (worst price).
+                # Sanity-check: for LONG mfe must be >= entry_price; for SHORT mfe <= entry_price.
+                use_pa = False
+                if mfe is not None and mae is not None and entry_p is not None:
+                    if direction == "LONG" and mfe >= entry_p and mae <= entry_p:
+                        use_pa = True
+                    elif direction == "SHORT" and mfe <= entry_p and mae >= entry_p:
+                        use_pa = True
                     else:
-                        r_shifted = r_orig
-                elif exit_reason == "stop_loss":
-                    if target_param == "SL":
+                        logger.warning(
+                            f"Trade {t.get('id')}: corrupt MFE/MAE data "
+                            f"(direction={direction}, entry={entry_p}, mfe={mfe}, mae={mae}). "
+                            "Falling back to Simple Mode for this trade."
+                        )
+
+                if use_pa:
+                    if sc_idx == 0:
+                        price_action_count += 1
+
+                    # Calculate shifted TP / SL distances
+                    if tp_p is not None:
+                        orig_tp_dist = abs(tp_p - entry_p)
+                    else:
+                        # No TP stored; estimate from R-multiple and risk_dist
+                        orig_tp_dist = abs(r_orig) * risk_dist if r_orig > 0 else risk_dist
+
+                    if target_param == "TP":
+                        new_tp_dist = orig_tp_dist * (1.0 + pct)
+                        new_sl_dist = risk_dist  # SL unchanged
+                    else:  # SL
+                        new_tp_dist = orig_tp_dist  # TP unchanged
                         new_sl_dist = risk_dist * (1.0 + pct)
+
+                    if new_sl_dist == 0:
+                        # Guard against zero SL (degenerate trade)
+                        shifted_r_list.append(r_orig)
+                        continue
+
+                    # Derive shifted price levels
+                    if direction == "LONG":
+                        new_tp_price = entry_p + new_tp_dist
+                        new_sl_price = entry_p - new_sl_dist
+                        hit_tp = mfe >= new_tp_price
+                        hit_sl = mae <= new_sl_price
+                    else:  # SHORT
+                        new_tp_price = entry_p - new_tp_dist
+                        new_sl_price = entry_p + new_sl_dist
+                        # For SHORT: MFE = min_low (best favorable price → checks TP)
+                        #            MAE = max_high (worst adverse price → checks SL)
+                        hit_tp = mfe <= new_tp_price   # price went down far enough to hit short TP
+                        hit_sl = mae >= new_sl_price   # price went up far enough to hit short SL
+
+                    # Tie-break: if BOTH levels were breached, follow the original exit_reason.
+                    # Rationale: MFE/MAE only store extreme points, not the chronological order
+                    # in which price levels were touched. This is a known limitation; full candle
+                    # replay would be required for exact determination (potential Fitur 20).
+                    if hit_tp and hit_sl:
+                        hit_tp = (exit_reason == "take_profit")
+                        hit_sl = not hit_tp
+
+                    if hit_tp:
+                        r_shifted = new_tp_dist / risk_dist
+                    elif hit_sl:
                         r_shifted = -(new_sl_dist / risk_dist)
                     else:
+                        # Price did not reach either shifted level → use original R
                         r_shifted = r_orig
+
+                # ── Simple Mode Fallback ───────────────────────────────────────
                 else:
-                    r_shifted = r_orig
+                    if sc_idx == 0:
+                        simple_mode_fallback_count += 1
+
+                    if exit_reason == "take_profit":
+                        if target_param == "TP" and tp_p:
+                            orig_tp_dist = abs(tp_p - entry_p)
+                            new_tp_dist = orig_tp_dist * (1.0 + pct)
+                            r_shifted = new_tp_dist / risk_dist
+                        else:
+                            r_shifted = r_orig
+                    elif exit_reason == "stop_loss":
+                        if target_param == "SL":
+                            new_sl_dist = risk_dist * (1.0 + pct)
+                            r_shifted = -(new_sl_dist / risk_dist)
+                        else:
+                            r_shifted = r_orig
+                    else:
+                        r_shifted = r_orig
 
                 shifted_r_list.append(r_shifted)
 
+            # ── Aggregate scenario metrics ─────────────────────────────────────────
             exp_shifted = float(np.mean(shifted_r_list)) if shifted_r_list else 0.0
             if exp_shifted <= 0:
                 all_scenarios_positive = False
@@ -313,6 +406,15 @@ class EdgeDiscoveryEngine:
         is_robust = all_scenarios_positive and (max_drop_pct <= cls.ROBUSTNESS_MAX_DROP_PCT)
         low_confidence = (manual_or_be_count / len(trades_sorted)) > 0.70 if trades_sorted else False
 
+        # Determine overall mode for UI badge
+        total_evaluated = price_action_count + simple_mode_fallback_count
+        if total_evaluated == 0 or price_action_count == 0:
+            mode = "simple_mode"
+        elif simple_mode_fallback_count == 0:
+            mode = "price_action"
+        else:
+            mode = "mixed"
+
         robustness_detail = {
             "original_expectancy_r": round(orig_expectancy, 4),
             "excluded_count": excluded_count,
@@ -321,6 +423,9 @@ class EdgeDiscoveryEngine:
             "all_scenarios_positive": all_scenarios_positive,
             "max_drop_pct": round(max_drop_pct, 4),
             "threshold": cls.ROBUSTNESS_MAX_DROP_PCT,
+            "mode": mode,
+            "price_action_count": price_action_count,
+            "simple_mode_fallback_count": simple_mode_fallback_count,
             "passed": is_robust
         }
 
@@ -347,6 +452,44 @@ class EdgeDiscoveryEngine:
         p_val = max(0.0001, min(1.0, float(p_val)))
 
         return mean_exp, ci_lower, ci_upper, p_val
+
+    @classmethod
+    def _determine_status(
+        cls,
+        n_tot: int,
+        is_fdr_significant: bool,
+        ci_lower: float,
+        oos_expectancy: float,
+        is_stable: Optional[bool],
+        is_repeatable: Optional[bool],
+        is_robust: Optional[bool],
+    ) -> str:
+        """
+        Pure function: determines edge status from sample size and statistical/qualitative criteria.
+        Extracted from run_discovery for independent testability.
+
+        Status Rules (Dokumen Teknis Bab 08.5 & Adendum Fitur 16):
+          - n < 20                                          -> 'learning'
+          - 20 <= n < 30                                    -> 'research'
+          - n >= 30, FDR significant, CI+ and OOS+,
+            n >= 50 AND all 3 criteria True                 -> 'production'
+          - n >= 30, FDR significant, CI+ and OOS+,
+            but n < 50 OR any criteria not True             -> 'validation'
+          - n >= 30, OOS < 0 OR CI lower < 0               -> 'monitoring'
+          - otherwise (n >= 30, not significant)            -> 'validation'
+        """
+        if n_tot < 20:
+            return "learning"
+        if 20 <= n_tot < 30:
+            return "research"
+        # n_tot >= 30
+        if is_fdr_significant and ci_lower > 0 and oos_expectancy > 0:
+            if n_tot >= 50 and (is_stable is True) and (is_repeatable is True) and (is_robust is True):
+                return "production"
+            return "validation"
+        if oos_expectancy < 0 or ci_lower < 0:
+            return "monitoring"
+        return "validation"
 
     @classmethod
     def run_discovery(cls, db: Session) -> Dict[str, Any]:
@@ -555,22 +698,15 @@ class EdgeDiscoveryEngine:
             is_rep = res["is_repeatable"]
             is_rob = res["is_robust"]
 
-            # Status Rules (Dokumen Teknis Bab 08.5 & Adendum Fitur 16)
-            if n_tot < 20:
-                status = "learning"
-            elif 20 <= n_tot < 30:
-                status = "research"
-            else:
-                # n_tot >= 30
-                if is_sig and ci_low > 0 and oos_exp > 0:
-                    if n_tot >= 50 and (is_st is True) and (is_rep is True) and (is_rob is True):
-                        status = "production"
-                    else:
-                        status = "validation"
-                elif oos_exp < 0 or ci_low < 0:
-                    status = "monitoring"
-                else:
-                    status = "validation"
+            status = cls._determine_status(
+                n_tot=n_tot,
+                is_fdr_significant=is_sig,
+                ci_lower=ci_low,
+                oos_expectancy=oos_exp,
+                is_stable=is_st,
+                is_repeatable=is_rep,
+                is_robust=is_rob,
+            )
 
             combo_json = list(res["combo"])
             combo_name = res["name"]

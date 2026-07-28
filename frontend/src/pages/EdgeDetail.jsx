@@ -293,8 +293,29 @@ const EdgeDetail = () => {
                   </table>
                   <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "8px", fontStyle: "italic", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <span>* Simulasi shift TP/SL ±5% & ±10% terhadap baseline. Excluded: {edge.robustness_detail.excluded_count ?? 0} trade.</span>
-                    <span style={{ backgroundColor: "rgba(168, 85, 247, 0.15)", border: "1px solid rgba(168, 85, 247, 0.3)", color: "#c084fc", padding: "2px 6px", borderRadius: "4px", fontWeight: "600" }}>
-                      {edge.robustness_detail.mode === "price_action" ? "✅ Akurat (Price Action MFE/MAE)" : "🏷️ Estimasi (Simple Mode Fallback)"}
+                    <span style={{
+                      backgroundColor: edge.robustness_detail.mode === "price_action"
+                        ? "rgba(16, 185, 129, 0.15)"
+                        : edge.robustness_detail.mode === "mixed"
+                          ? "rgba(245, 158, 11, 0.15)"
+                          : "rgba(168, 85, 247, 0.15)",
+                      border: edge.robustness_detail.mode === "price_action"
+                        ? "1px solid rgba(16, 185, 129, 0.3)"
+                        : edge.robustness_detail.mode === "mixed"
+                          ? "1px solid rgba(245, 158, 11, 0.3)"
+                          : "1px solid rgba(168, 85, 247, 0.3)",
+                      color: edge.robustness_detail.mode === "price_action"
+                        ? "#34d399"
+                        : edge.robustness_detail.mode === "mixed"
+                          ? "#fbbf24"
+                          : "#c084fc",
+                      padding: "2px 6px", borderRadius: "4px", fontWeight: "600"
+                    }}>
+                      {edge.robustness_detail.mode === "price_action"
+                        ? "✅ Akurat (Price Action MFE/MAE)"
+                        : edge.robustness_detail.mode === "mixed"
+                          ? `⚠️ Sebagian Akurat (${edge.robustness_detail.price_action_count ?? 0} dari ${(edge.robustness_detail.price_action_count ?? 0) + (edge.robustness_detail.simple_mode_fallback_count ?? 0)} trade pakai Price Action)`
+                          : "🏷️ Estimasi (Simple Mode Fallback)"}
                     </span>
                   </div>
                 </div>
