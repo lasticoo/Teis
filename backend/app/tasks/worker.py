@@ -3,9 +3,10 @@ import logging
 import redis
 import requests
 import pandas as pd
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from celery import Celery
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import SessionLocal
@@ -147,12 +148,22 @@ def poll_open_positions():
             direction = "long" if pos_amt > 0 else "short"
             margin = (abs(pos_amt) * entry_price_binance / leverage) if (leverage and leverage > 0) else None
 
-            # Check if this position is already tracked
-            if symbol in active_trades_map:
-                # Update SL/TP and live parameters if changed in Binance
-                trade = active_trades_map[symbol]
+            # Check if this position is already tracked (either currently active or created recently for this position)
+            trade = active_trades_map.get(symbol)
+            if not trade:
+                trade = db.query(Trade).filter(
+                    Trade.pair == symbol,
+                    Trade.data_source == 'binance_sync',
+                    or_(
+                        Trade.exit_time == None,
+                        Trade.entry_time >= (update_time - timedelta(minutes=30))
+                    )
+                ).order_by(Trade.created_at.desc()).first()
+
+            if trade:
+                # Reuse existing trade record & reset exit_time if it was temporarily closed
+                trade.exit_time = None
                 try:
-                    # Update leverage / margin if present
                     if leverage:
                         trade.leverage = leverage
                     if margin:
@@ -162,14 +173,26 @@ def poll_open_positions():
                 except Exception as e:
                     logger.error(f"Failed to update SL/TP for active trade {trade.id}: {str(e)}")
                     db.rollback()
+                active_trades_map[symbol] = trade
                 continue
 
-            # Position is new -> Create Trade shell and link entry fills
-            logger.info(f"New active position detected for {symbol}. Creating trade shell...")
-            
-            direction = "long" if pos_amt > 0 else "short"
-            margin = (abs(pos_amt) * entry_price_binance / leverage) if leverage else None
+            # Check entry fills BEFORE creating trade shell to prevent cancelled orders from spawning ghost trades
+            start_ts = int(pos["updateTime"]) - 900000  # 15 minutes ago
+            try:
+                fills = BinanceService.get_user_trades(db, symbol, start_time=start_ts)
+            except Exception as e:
+                logger.error(f"Failed to retrieve entry fills for candidate position {symbol}: {e}")
+                fills = []
 
+            target_side = "BUY" if direction == "long" else "SELL"
+            valid_entry_fills = [f for f in fills if f.get("side", "").upper() == target_side]
+
+            if not valid_entry_fills and abs(pos_amt) == 0:
+                logger.info(f"Skipping trade creation for {symbol}: No entry fills found and positionAmt is 0.")
+                continue
+
+            # Position is genuine -> Create Trade shell and link entry fills
+            logger.info(f"New active position detected for {symbol}. Creating trade shell...")
             trade = Trade(
                 pair=symbol,
                 direction=direction,
@@ -183,19 +206,10 @@ def poll_open_positions():
             db.add(trade)
             db.flush()
 
-            # Retrieve entry fills from last 15 minutes
-            try:
-                start_ts = int(pos["updateTime"]) - 900000  # 15 minutes ago
-                fills = BinanceService.get_user_trades(db, symbol, start_time=start_ts)
-                process_fills(db, trade, fills, role="entry")
-            except Exception as e:
-                logger.error(f"Failed to retrieve entry fills for new trade {trade.id}: {str(e)}")
-
-            # Check Stop Loss / Take Profit
-            try:
-                update_sl_tp(db, trade)
-            except Exception as e:
-                logger.error(f"Failed to fetch SL/TP orders for trade {trade.id}: {str(e)}")
+            process_fills(db, trade, fills, role="entry")
+            update_sl_tp(db, trade)
+            db.commit()
+            active_trades_map[symbol] = trade
 
             # Trigger multi-channel notification (In-App, Web Push, Email)
             try:
@@ -215,7 +229,7 @@ def poll_open_positions():
         for pair, trade in active_trades_map.items():
             if pair not in active_pos_map:
                 # Position has been closed!
-                logger.info(f"Active position for {pair} is no longer open. Closing trade journal record...")
+                logger.info(f"Active position for {pair} is no longer open. Processing exit fills for trade {trade.id}...")
                 
                 # Fetch recent trades to find exit fills
                 try:
@@ -230,8 +244,19 @@ def poll_open_positions():
                     logger.error(f"Failed to process exit fills for trade {trade.id}: {str(e)}")
                     if not trade.exit_price:
                         trade.exit_price = trade.entry_price
-                    if not trade.exit_time:
-                        trade.exit_time = datetime.now(timezone.utc)
+
+                # Check if trade has ANY entry fills linked to it
+                entry_fills_count = db.query(TradeFill).filter(
+                    TradeFill.trade_id == trade.id,
+                    TradeFill.role == "entry"
+                ).count()
+
+                if entry_fills_count == 0 and not trade.setup_tags:
+                    # GHOST TRADE! Delete empty record created by cancelled order
+                    logger.info(f"Trade {trade.id} ({pair}) has 0 entry fills and no tags. Deleting ghost trade record...")
+                    db.delete(trade)
+                    db.commit()
+                    continue
 
                 # Ensure exit_time is explicitly set if missing
                 if trade.exit_time is None:
