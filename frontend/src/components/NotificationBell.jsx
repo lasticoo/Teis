@@ -21,7 +21,7 @@ const NotificationBell = ({ notifications = [], unreadCount = 0, onAcknowledge, 
     if (onAcknowledge) onAcknowledge(notif.id);
     setIsOpen(false);
     if (notif.reference_id && notif.type === "trade_pending_tag") {
-      navigate(`/journal/detail/${notif.reference_id}`);
+      navigate(`/quick-tag?trade_id=${notif.reference_id}`);
     } else {
       navigate("/journal");
     }

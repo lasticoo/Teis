@@ -54,7 +54,7 @@ const NotificationBanner = ({ notification, onAcknowledge }) => {
 
   const handleAction = () => {
     if (notification.reference_id && isPendingTag) {
-      navigate(`/journal/detail/${notification.reference_id}`);
+      navigate(`/quick-tag?trade_id=${notification.reference_id}`);
     } else {
       navigate("/journal");
     }

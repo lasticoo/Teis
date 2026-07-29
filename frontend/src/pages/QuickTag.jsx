@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import MarketContextCard from "../components/MarketContextCard";
 
 const QuickTag = () => {
+  const location = useLocation();
   const [trades, setTrades] = useState([]);
   const [taxonomy, setTaxonomy] = useState([]);
   const [selectedTrade, setSelectedTrade] = useState(null);
@@ -35,7 +37,11 @@ const QuickTag = () => {
   const fetchPendingData = async () => {
     try {
       setLoading(true);
-      const res = await fetch("http://localhost:8000/api/v1/journal/pending", {
+      const urlParams = new URLSearchParams(location.search || window.location.search);
+      const targetId = urlParams.get("trade_id");
+      const endpoint = `http://localhost:8000/api/v1/journal/pending${targetId ? `?trade_id=${targetId}` : ""}`;
+
+      const res = await fetch(endpoint, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -49,9 +55,6 @@ const QuickTag = () => {
       setTrades(data.trades);
       setTaxonomy(data.taxonomy);
 
-      // Check if URL specifies a target trade_id
-      const urlParams = new URLSearchParams(window.location.search);
-      const targetId = urlParams.get("trade_id");
       if (targetId) {
         const found = data.trades.find((t) => t.id === targetId);
         if (found) {
@@ -60,15 +63,18 @@ const QuickTag = () => {
         }
       }
 
-      // Default select the first untagged trade if none selected
-      if (data.trades.length > 0 && !selectedTrade) {
-        handleSelectTrade(data.trades[0]);
-      } else if (selectedTrade) {
-        // Refresh selected trade data
-        const updated = data.trades.find((t) => t.id === selectedTrade.id);
-        if (updated) {
-          setSelectedTrade(updated);
+      // Default select the first untagged trade if none selected or target not found
+      if (data.trades.length > 0) {
+        if (!selectedTrade || !data.trades.some((t) => t.id === selectedTrade.id)) {
+          handleSelectTrade(data.trades[0]);
+        } else {
+          const updated = data.trades.find((t) => t.id === selectedTrade.id);
+          if (updated) {
+            setSelectedTrade(updated);
+          }
         }
+      } else {
+        setSelectedTrade(null);
       }
     } catch (err) {
       setError(err.message);
@@ -79,7 +85,7 @@ const QuickTag = () => {
 
   useEffect(() => {
     fetchPendingData();
-  }, []);
+  }, [location.search]);
 
   // Offline syncing
   useEffect(() => {

@@ -176,7 +176,11 @@ def seed_taxonomy_if_empty(db: Session):
         db.commit()
 
 @router.get("/journal/pending")
-def get_pending_trades(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+def get_pending_trades(
+    trade_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
     # Seed setup options if empty
     seed_taxonomy_if_empty(db)
     
@@ -188,19 +192,22 @@ def get_pending_trades(db: Session = Depends(get_db), current_user = Depends(get
     
     results = []
     for t in all_trades:
-        is_tagged = t.psychology is not None
+        is_tagged = t.psychology is not None and len(t.setup_tags) > 0
         is_locked = t.locked_at is not None
         seconds_left = None
 
-        # Locked trades (including locked mock trades or expired window) are excluded from Quick-Tag pending
-        if is_locked:
-            continue
+        is_target_trade = (trade_id is not None and str(t.id) == str(trade_id))
 
-        if is_tagged:
-            elapsed = (datetime.now() - (t.psychology.created_at if hasattr(t.psychology, 'created_at') and t.psychology.created_at else t.created_at)).total_seconds()
-            seconds_left = max(0.0, 120.0 - elapsed)
-            if seconds_left <= 0:
+        if not is_target_trade:
+            # Locked trades are excluded from general Quick-Tag pending
+            if is_locked:
                 continue
+
+            if is_tagged:
+                elapsed = (datetime.now() - (t.psychology.created_at if hasattr(t.psychology, 'created_at') and t.psychology.created_at else t.created_at)).total_seconds()
+                seconds_left = max(0.0, 120.0 - elapsed)
+                if seconds_left <= 0:
+                    continue
         
         results.append({
             "id": t.id,
