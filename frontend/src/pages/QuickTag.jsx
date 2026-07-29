@@ -49,6 +49,17 @@ const QuickTag = () => {
       setTrades(data.trades);
       setTaxonomy(data.taxonomy);
 
+      // Check if URL specifies a target trade_id
+      const urlParams = new URLSearchParams(window.location.search);
+      const targetId = urlParams.get("trade_id");
+      if (targetId) {
+        const found = data.trades.find((t) => t.id === targetId);
+        if (found) {
+          handleSelectTrade(found);
+          return;
+        }
+      }
+
       // Default select the first untagged trade if none selected
       if (data.trades.length > 0 && !selectedTrade) {
         handleSelectTrade(data.trades[0]);

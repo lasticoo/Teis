@@ -287,12 +287,33 @@ const Journal = () => {
                         </span>
                       </td>
                       <td style={styles.td}>
-                        <button
-                          onClick={() => navigate(`/journal/detail/${t.id}`)}
-                          style={styles.detailBtnNav}
-                        >
-                          Lihat Detail →
-                        </button>
+                        <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                          {(!t.setups || t.setups.length === 0) && (
+                            <button
+                              onClick={() => navigate(`/quick-tag?trade_id=${t.id}`)}
+                              style={{
+                                backgroundColor: "#7c3aed",
+                                color: "#ffffff",
+                                border: "none",
+                                padding: "4px 10px",
+                                borderRadius: "6px",
+                                fontSize: "11px",
+                                fontWeight: "700",
+                                cursor: "pointer",
+                                boxShadow: "0 0 10px rgba(124, 58, 237, 0.4)",
+                                whiteSpace: "nowrap"
+                              }}
+                            >
+                              ⚡ Quick Tag
+                            </button>
+                          )}
+                          <button
+                            onClick={() => navigate(`/journal/detail/${t.id}`)}
+                            style={styles.detailBtnNav}
+                          >
+                            Lihat Detail →
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   </React.Fragment>

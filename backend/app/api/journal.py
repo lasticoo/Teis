@@ -191,16 +191,15 @@ def get_pending_trades(db: Session = Depends(get_db), current_user = Depends(get
         is_tagged = t.psychology is not None
         is_locked = t.locked_at is not None
         seconds_left = None
-        
+
+        # Locked trades (including locked mock trades or expired window) are excluded from Quick-Tag pending
+        if is_locked:
+            continue
+
         if is_tagged:
-            if is_locked:
-                seconds_left = 0
-            else:
-                elapsed = (datetime.now() - (t.psychology.created_at if hasattr(t.psychology, 'created_at') and t.psychology.created_at else t.created_at)).total_seconds()
-                seconds_left = max(0.0, 120.0 - elapsed)
-            
-            # If 120s window expired or locked, automatically remove from Quick-Tag pending list!
-            if seconds_left <= 0 or is_locked:
+            elapsed = (datetime.now() - (t.psychology.created_at if hasattr(t.psychology, 'created_at') and t.psychology.created_at else t.created_at)).total_seconds()
+            seconds_left = max(0.0, 120.0 - elapsed)
+            if seconds_left <= 0:
                 continue
         
         results.append({

@@ -280,6 +280,24 @@ const TradeDetail = () => {
                 {trade.status}
               </span>
               {trade.is_locked && <span style={styles.badgeLocked}>🔒 Terkunci</span>}
+              {!trade.psychology && (
+                <button
+                  onClick={() => navigate(`/quick-tag?trade_id=${trade.id}`)}
+                  style={{
+                    backgroundColor: "#7c3aed",
+                    color: "#ffffff",
+                    border: "none",
+                    padding: "6px 14px",
+                    borderRadius: "8px",
+                    fontSize: "12px",
+                    fontWeight: "700",
+                    cursor: "pointer",
+                    boxShadow: "0 0 12px rgba(124, 58, 237, 0.4)",
+                  }}
+                >
+                  ⚡ Quick Tag Trade Ini
+                </button>
+              )}
             </div>
             <span style={styles.subText}>
               Entry Time: {formatDateTimeWIB(trade.entry_time)}
