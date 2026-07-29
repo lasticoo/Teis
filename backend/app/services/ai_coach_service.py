@@ -392,11 +392,21 @@ class AICoachService:
         image_payloads = []
         sc_summary = []
         for s in screenshots:
-            stage_name = "Chart 4H HTF" if s["stage"] == "before_entry_4h" else ("Chart 1H LTF" if s["stage"] == "before_entry_1h" else "Chart Exit Target")
+            stage_st = str(s.get("stage", "")).lower()
+            if stage_st == "before_entry_4h":
+                stage_name = "Chart 4H HTF (Before Entry)"
+            elif stage_st == "before_entry_1h":
+                stage_name = "Chart 1H LTF (Before Entry)"
+            elif stage_st in ("after_exit", "exit_target", "chart_exit", "exit"):
+                stage_name = "Chart AFTER Exit (Hasil Pasca Exit & Pergerakan Harga)"
+            else:
+                stage_name = f"Chart {stage_st.upper()} (Visualisasi)"
+
             sc_summary.append(f"• {stage_name}: URL={s['url']}")
             b64_info = cls._fetch_image_as_base64(s["url"])
             if b64_info:
                 b64_info["stage"] = s["stage"]
+                b64_info["stage_name"] = stage_name
                 image_payloads.append(b64_info)
 
         sc_text = "\n".join(sc_summary) if sc_summary else "Belum ada foto chart diunggah di jurnal ini."
@@ -421,6 +431,15 @@ PERSPEKTIF MENTOR & CARA BERPIKIR TRADER PROFESIONAL:
 • JANGAN HANYA MENUNJUKKAN KESALAHAN TRADER, tetapi berikan pembimbingan konstruktif, objektif, tajam, dan mendalam.
 • Jangan pernah memberi pujian atau pembenaran otomatis hanya karena hasil trade positif. Nilai KUALITAS PROSES eksekusi secara independen dari hasil P&L. Jika proses entry lemah meski untung, katakan itu terus terang.
 • Jangan pernah menyebut suatu setup sebagai 'terbukti', 'edge kuat', atau menyarankan 'scale up/double down' jika sample size di bawah {cls.MIN_SAMPLE_SIZE_FOR_EDGE_CLAIM} trade.
+
+PETUNJUK KUALITAS FORMATTING & PENGLIHATAN CHART VISUAL:
+1. INSPEKSI CHART VISUAL BEFORE ENTRY & AFTER EXIT:
+   - Gunakan penglihatan visual Anda (Vision Capability) untuk membandingkan secara teliti gambar chart yang dilampirkan: **Before Entry (4H/1H)** DAN **Chart AFTER Exit**.
+   - Di **Chart AFTER Exit**, amati pergerakan harga pasca-exit: apakah harga mencapai target TP/SL, apakah terjadi pembalikan/wicking tajam setelah exit, dan bagaimana dinamika pergerakan struktur harga terbentuk setelah posisi ditutup.
+2. FORMAT PENULISAN MARKDOWN YANG HIGH-READABILITY & ENAK DIBACA:
+   - Buat format penulisan yang SANGAT RAPI, BERSIH, TERSTRUKTUR, DENGAN SPACING YANG NYAMAN DIBACA.
+   - Gunakan **Tabel Markdown Rapi** untuk Bagian 2 (Validasi Tag Setup) dan Bagian 6 (Rapor Penilaian 1–10).
+   - Gunakan penekanan teks **bold** untuk istilah penting, bullet points teratur, serta aksen emoji yang estetis.
 
 Evaluasi transaksi berikut secara kualitatif, teknikal, dan psikologis:
 
@@ -460,9 +479,12 @@ Evaluasi transaksi berikut secara kualitatif, teknikal, dan psikologis:
 • Expectancy Histori: {hist['expectancy_r']} R
 • Evaluasi Validitas Sampel: {stat_caveat}
 
-Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
+Tuliskan evaluasi dalam 9 bagian Markdown yang SANGAT RAPI, BERSIH, DAN ENAK DIBACA:
 1. 📌 **Analisis Eksekusi SMC & Order Flow Pasar**
 2. 📈 **Analisis Teknikal Chart 4H / 1H & Validasi Tag Setup Terpilih [{tag_str}]**
+   - Sertakan analisis visual chart **Before Entry** DAN **Chart AFTER Exit**.
+   - Tampilkan **Tabel Markdown** validasi tag setup:
+     | Tag SMC Terpilih | Keberadaan pada Chart | Konsistensi & Validasi SMC Detail |
 3. 📉 **Pertumbuhan Ekuitas Akun Harian (Daily Equity Growth & R Trajectory)**
 4. 🧠 **Audit Psikologi, Bias Mental & Adherensi Plan**
 5. 🔍 **Refleksi Cara Berpikir Trader Profesional (5 Pertanyaan Kunci Mentor)**:
@@ -472,15 +494,11 @@ Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
    - **Apa yang Dilihat Trader Berpengalaman tetapi Terlewatkan**: [Penjelasan]
    - **Pelajaran Terbesar dari Trade Ini**: [Penjelasan]
 6. 🎯 **Rapor Penilaian Mentor (Skala 1–10)**:
-   - Market Structure: X/10
-   - Liquidity Reading: X/10
-   - Bias: X/10
-   - Entry Timing: X/10
-   - Risk Management: X/10
-   - Keseluruhan Kualitas Setup: X/10
+   - Tampilkan dalam **Tabel Markdown Rapi**:
+     | Kriteria Evaluasi | Skor (1-10) | Penjelasan Mentor Detail |
 7. 🏆 **Klasifikasi Tier Setup & Alasan Penilaian**:
-   - Klasifikasi: [A+ Setup / A Setup / B Setup / C Setup]
-   - Alasan Penilaian Detail
+   - **Klasifikasi**: [A+ Setup / A Setup / B Setup / C Setup]
+   - **Alasan Penilaian Detail**: [Penjelasan]
 8. 📊 **Ekspektasi Matematik Jangka Panjang vs Variansi Acak**
 9. 💡 **Instruksi Kunci Mentor SMC untuk Scaling Modal**
 """.strip()

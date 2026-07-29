@@ -31,18 +31,14 @@ def test_single_trade_prompt_contains_all_mentor_framework_elements():
     assert isinstance(prompt, str)
     assert isinstance(img_payloads, list)
     assert "PERSPEKTIF MENTOR & CARA BERPIKIR TRADER PROFESIONAL" in prompt
+    assert "INSPEKSI CHART VISUAL BEFORE ENTRY & AFTER EXIT" in prompt
     assert "Mengapa Analisis Salah" in prompt
     assert "Prinsip SMC yang Dilanggar" in prompt
     assert "Apa yang Seharusnya Dilihat Terlebih Dahulu" in prompt
     assert "Apa yang Dilihat Trader Berpengalaman tetapi Terlewatkan" in prompt
     assert "Pelajaran Terbesar" in prompt
     assert "Rapor Penilaian Mentor (Skala 1–10)" in prompt
-    assert "Market Structure:" in prompt
-    assert "Liquidity Reading:" in prompt
-    assert "Bias:" in prompt
-    assert "Entry Timing:" in prompt
-    assert "Risk Management:" in prompt
-    assert "Keseluruhan Kualitas Setup:" in prompt
+    assert "Kriteria Evaluasi" in prompt
     assert "Klasifikasi Tier Setup & Alasan Penilaian" in prompt
     assert "[A+ Setup / A Setup / B Setup / C Setup]" in prompt
 
