@@ -213,6 +213,11 @@ def get_pending_trades(db: Session = Depends(get_db), current_user = Depends(get
             "is_tagged": t.psychology is not None,
             "is_locked": is_locked,
             "seconds_left": seconds_left,
+            # tagged_at = timestamp when user clicked Submit on QuickTag (psychology row created_at)
+            # Frontend uses this to restore the accurate remaining correction window
+            "tagged_at": (t.psychology.created_at.isoformat()
+                          if t.psychology and hasattr(t.psychology, "created_at") and t.psychology.created_at
+                          else None),
             "psychology": {
                 "confidence_level": t.psychology.confidence_level,
                 "psychological_tags": t.psychology.psychological_tags,

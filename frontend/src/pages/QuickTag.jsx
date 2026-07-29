@@ -25,8 +25,9 @@ const QuickTag = () => {
   const [screenshot1h, setScreenshot1h] = useState(null);
   const [screenshotPreview1h, setScreenshotPreview1h] = useState(null);
 
-  // Countdown state
+  // Countdown state — starts when user submits form, NOT when Binance position is detected
   const [countdown, setCountdown] = useState(null);
+  const [countdownOrigin, setCountdownOrigin] = useState(null); // timestamp user clicked Submit
 
   const token = localStorage.getItem("token");
 
@@ -125,7 +126,9 @@ const QuickTag = () => {
         setPsychology(draft.psychology || []);
         setPlanAdherence(draft.planAdherence ?? true);
         setFreeNotes(draft.freeNotes || "");
-        setCountdown(trade.seconds_left !== null ? Math.floor(trade.seconds_left) : null);
+        // Do NOT restore countdown from server — timer only starts on Submit
+        setCountdown(null);
+        setCountdownOrigin(null);
         return;
       } catch (e) {
         console.error("Failed to parse draft", e);
@@ -139,9 +142,25 @@ const QuickTag = () => {
       setPlanAdherence(trade.psychology.plan_adherence);
       setFreeNotes(trade.psychology.free_notes || "");
       setOrderType(trade.order_type || "limit");
-      setCountdown(trade.seconds_left !== null ? Math.floor(trade.seconds_left) : null);
+      // Restore remaining correction window based on tagged_at (server timestamp),
+      // NOT seconds_left which counts from Binance detection time.
+      // tagged_at + 120s = lock deadline; remaining = deadline - now.
+      if (trade.tagged_at) {
+        const lockDeadline = new Date(trade.tagged_at).getTime() + 120 * 1000;
+        const remaining = Math.floor((lockDeadline - Date.now()) / 1000);
+        if (remaining > 0) {
+          setCountdown(remaining);
+          setCountdownOrigin(lockDeadline);
+        } else {
+          setCountdown(0);
+          setCountdownOrigin(null);
+        }
+      } else {
+        setCountdown(null);
+        setCountdownOrigin(null);
+      }
     } else {
-      // Fresh tag defaults
+      // Fresh untagged trade — no countdown yet, timer starts on Submit
       setSelectedSetups([]);
       setBias("bull_trend");
       setSession(detectSession(trade.entry_time));
@@ -151,6 +170,7 @@ const QuickTag = () => {
       setPlanAdherence(true);
       setFreeNotes("");
       setCountdown(null);
+      setCountdownOrigin(null);
     }
   };
 
@@ -345,8 +365,12 @@ const QuickTag = () => {
       localStorage.removeItem(`teis_quicktag_draft_${selectedTrade.id}`);
 
       setSuccessMsg("Jurnal berhasil disimpan! Trade berada di window koreksi 120 detik.");
+      // ✅ Timer starts HERE — when user clicks Submit, not when Binance detects the position
+      const submitTime = Date.now();
+      const deadline = submitTime + 120 * 1000;
       setCountdown(120);
-      
+      setCountdownOrigin(deadline);
+
       // Refresh list to update UI
       await fetchPendingData();
     } catch (err) {
@@ -423,7 +447,7 @@ const QuickTag = () => {
                   </span>
                 </div>
 
-                {/* Progress bar window koreksi */}
+                {/* Progress bar window koreksi — hanya muncul SETELAH user klik Submit */}
                 {countdown !== null && (
                   <div style={styles.countdownWrapper}>
                     <div style={styles.countdownHeader}>
@@ -434,11 +458,16 @@ const QuickTag = () => {
                       <div
                         style={{
                           ...styles.progressBar,
-                          width: `${(countdown / 120) * 100}%`,
+                          width: `${Math.min(100, (countdown / 120) * 100)}%`,
                           backgroundColor: countdown > 20 ? "#10b981" : "#ef4444",
                         }}
                       />
                     </div>
+                    {countdown > 0 && (
+                      <p style={{ fontSize: "11px", color: "#94a3b8", margin: "4px 0 0", fontStyle: "italic" }}>
+                        Timer dimulai saat Anda menyimpan jurnal ini.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
