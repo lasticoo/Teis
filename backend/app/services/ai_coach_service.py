@@ -338,7 +338,11 @@ class AICoachService:
         return f"""
 Anda adalah Master Institutional SMC (Smart Money Concepts) & ICT Elite Trading Mentor yang telah terbukti sukses menumbuhkan modal kecil menjadi portofolio besar secara konsisten melalui eksekusi presisi tinggi dan disiplin risiko 1R ekuitas.
 
-Evaluasi transaksi berikut dengan memberikan ulasan mentor kualitatif, analisis teknikal chart 4H/1H (pencocokan tag setup terpilih), DAN analisis pertumbuhan ekuitas akun harian (Equity Growth Trajectory):
+PERSPEKTIF MENTOR & CARA BERPIKIR TRADER PROFESIONAL:
+• Anggap trader ini adalah murid Anda yang ingin belajar berpikir seperti seorang trader profesional.
+• JANGAN HANYA MENUNJUKKAN KESALAHAN TRADER, tetapi berikan pembimbingan konstruktif, objektif, tajam, dan mendalam.
+
+Evaluasi transaksi berikut secara kualitatif, teknikal, dan psikologis:
 
 === PARAMETER TRANS-EKSEKUSI JURNAL ===
 • Pair / Instrumen: {data['symbol_pair']} (Arah: {data['direction'].upper()})
@@ -375,13 +379,29 @@ Evaluasi transaksi berikut dengan memberikan ulasan mentor kualitatif, analisis 
 • Rata-rata RR Histori: {hist['avg_rr']} R
 • Expectancy Histori: {hist['expectancy_r']} R
 
-Tuliskan evaluasi dalam 6 bagian Markdown terstruktur khas Mentor SMC Senior:
+Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
 1. 📌 **Analisis Eksekusi SMC & Order Flow Pasar**
 2. 📈 **Analisis Teknikal Chart 4H / 1H & Validasi Tag Setup Terpilih [{tag_str}]**
 3. 📉 **Pertumbuhan Ekuitas Akun Harian (Daily Equity Growth & R Trajectory)**
 4. 🧠 **Audit Psikologi, Bias Mental & Adherensi Plan**
-5. 📊 **Ekspektasi Matematik Jangka Panjang vs Variansi Acak**
-6. 💡 **Instruksi Kunci Mentor SMC untuk Scaling Modal**
+5. 🔍 **Refleksi Cara Berpikir Trader Profesional (5 Pertanyaan Kunci Mentor)**:
+   - **Mengapa Analisis Salah (jika ada)**: [Penjelasan]
+   - **Prinsip SMC yang Dilanggar (jika ada)**: [Penjelasan]
+   - **Apa yang Seharusnya Dilihat Terlebih Dahulu**: [Penjelasan]
+   - **Apa yang Dilihat Trader Berpengalaman tetapi Terlewatkan**: [Penjelasan]
+   - **Pelajaran Terbesar dari Trade Ini**: [Penjelasan]
+6. 🎯 **Rapor Penilaian Mentor (Skala 1–10)**:
+   - Market Structure: X/10
+   - Liquidity Reading: X/10
+   - Bias: X/10
+   - Entry Timing: X/10
+   - Risk Management: X/10
+   - Keseluruhan Kualitas Setup: X/10
+7. 🏆 **Klasifikasi Tier Setup & Alasan Penilaian**:
+   - Klasifikasi: [A+ Setup / A Setup / B Setup / C Setup]
+   - Alasan Penilaian Detail
+8. 📊 **Ekspektasi Matematik Jangka Panjang vs Variansi Acak**
+9. 💡 **Instruksi Kunci Mentor SMC untuk Scaling Modal**
 """.strip()
 
     @classmethod
@@ -752,6 +772,78 @@ Tuliskan evaluasi dalam 6 bagian Markdown terstruktur khas Mentor SMC Senior:
             takeaways.append("• **Instruksi Mentor**: Pertahankan manajemen risiko 1R ekuitas konstan ($0.96) dan fokus pada konfluensi HTF Discount/Premium Zone.")
             takeaways.append("• **Instruksi Mentor**: Selalu tunggu pembentukan *Liquidity Sweep & CHOCH* sebelum mengeksekusi entry di LTF.")
 
+        # Refleksi Cara Berpikir Trader Profesional (5 Pertanyaan Kunci Mentor)
+        htf_str = mkt.get("trend_htf", "N/A")
+        if outcome == "LOSS":
+            if not adherence:
+                why_wrong = "Analisis dan eksekusi mengalami kegagalan utama karena adanya deviasi dari trading plan (impulsif/FOMO). Posisi diambil tanpa konfirmasi struktur Liquidity Sweep & CHOCH yang valid."
+                smc_viol = "Pelanggaran prinsip *HTF Liquidity Sweep & Inducement Validation*. Trade dimasukkan sebelum harga memitigasi POI (Order Block/FVG) utama."
+                should_see_first = "Seharusnya Anda mengidentifikasi arah Trend HTF (4H) dan menunggu lokasi Discount/Premium Zone sebelum memicu trigger di LTF."
+                pros_see = "Trader berpengalaman melihat *Liquidity Pool (Buy-side/Sell-side liquidity)* lawan yang diincar institusi dan sabar menunggu pembalikan harga, bukan mengejar candle impulsif."
+                biggest_lesson = "Jangan pernah mengeksekusi posisi tanpa konfirmasi 100% kriteria plan. 1R loss akibat deviasi plan adalah risiko tidak perlu."
+            else:
+                why_wrong = f"Analisis teknikal telah selaras dengan rencana SMC, namun pasar mengalami variansi normal/spike volatilitas yang menembus Invalidation Level di area Stop Loss ({rr} R)."
+                smc_viol = "Tidak ada pelanggaran kedisiplinan dasar. Namun pastikan titik SL diletakkan sedikit di luar *Liquidity Sweep High/Low* untuk mengantisipasi stop hunt."
+                should_see_first = "Seharusnya Anda memverifikasi adanya agenda berita High-Impact (*news event*) atau bentukan *Equally Highs/Lows (EQH/EQL)* di dekat titik entry."
+                pros_see = "Trader berpengalaman melihat apakah Liquidity Sweep di HTF sudah benar-benar bersih atau masih ada *Unmitigated FVG* di bawah/atas harga."
+                biggest_lesson = "Kerugian 1R dengan kepatuhan rencana yang disiplin adalah biaya bisnis yang sah dalam matematika R-Multiple. Pertahankan manajemen risiko 1R."
+        elif outcome == "WIN":
+            why_wrong = "Analisis berjalan efisien sesuai pergerakan *Smart Money Order Flow*. Tidak ditemukan kesalahan struktural fatal pada trade ini."
+            smc_viol = "Prinsip SMC dijalankan dengan presisi (*Mitigation Order Block + FVG imbalance fill*)."
+            should_see_first = "Struktur HTF 4H dan lokasi Liquidity Target di area Unmitigated Zone."
+            pros_see = "Trader berpengalaman mengidentifikasi *Displacement & CHOCH* di LTF yang mengonfirmasi dorongan institusional ke target."
+            biggest_lesson = "Kesabaran menunggu harga tiba di POI utama selalu membuahkan R-Multiple yang tinggi dan efisien."
+        else:
+            why_wrong = "Analisis awal benar, namun momentum dorongan harga tertahan di area struktur perantara sebelum mencapai target TP utama."
+            smc_viol = "Tidak ada pelanggaran berat, namun menggeser SL ke BE terlalu dini dapat membuat posisi terkeluar sebelum ekspansi utama."
+            should_see_first = "Lokasi *Minor Liquidity / Internal Structure* yang berpotensi memicu pembalikan sementara."
+            pros_see = "Trader berpengalaman melihat apakah pembentukan BOS baru sudah cukup kuat untuk menjamin pergerakan Breakeven."
+            biggest_lesson = "Mengamankan modal di titik BE adalah pertahanan ekuitas yang baik, namun harus dilakukan setelah pembentukan struktur baru."
+
+        pro_reflection_review = (
+            f"• **Mengapa Analisis Salah (jika ada)**: {why_wrong}\n"
+            f"• **Prinsip SMC yang Dilanggar (jika ada)**: {smc_viol}\n"
+            f"• **Apa yang Seharusnya Dilihat Terlebih Dahulu**: {should_see_first}\n"
+            f"• **Apa yang Dilihat Trader Berpengalaman tetapi Terlewatkan**: {pros_see}\n"
+            f"• **Satu Pelajaran Terbesar dari Trade Ini**: {biggest_lesson}"
+        )
+
+        # Rapor Penilaian Mentor (Skala 1–10)
+        ms_score = 9 if (htf_str != "N/A" and ((direction == "LONG" and htf_str.lower() == "bullish") or (direction == "SHORT" and htf_str.lower() == "bearish"))) else 7
+        lr_score = 9 if outcome == "WIN" else (7 if adherence else 5)
+        bias_score = 9 if ms_score == 9 else 6
+        entry_score = 9 if (outcome == "WIN" and holding_mins <= 240) else (7 if outcome != "LOSS" else 6)
+        rm_score = 10 if (adherence and exit_reason in ("stop_loss", "take_profit", "breakeven")) else (8 if adherence else 5)
+        overall_score = round((ms_score + lr_score + bias_score + entry_score + rm_score) / 5, 1)
+
+        scorecard_review = (
+            f"• **Market Structure**: {ms_score}/10\n"
+            f"• **Liquidity Reading**: {lr_score}/10\n"
+            f"• **Bias**: {bias_score}/10\n"
+            f"• **Entry Timing**: {entry_score}/10\n"
+            f"• **Risk Management**: {rm_score}/10\n"
+            f"• **Keseluruhan Kualitas Setup**: {overall_score}/10"
+        )
+
+        # Klasifikasi Tier Setup & Alasan Penilaian
+        if outcome == "WIN" and adherence and rr >= 2.0:
+            tier_class = "A+ Setup"
+            tier_reason = f"Trade memenuhi 100% kriteria SMC, disiplin plan terjaga, dan menghasilkan R-Multiple tinggi (+{rr} R) dengan ekspansi momentum yang presisi."
+        elif outcome == "WIN" or (adherence and outcome == "BREAKEVEN"):
+            tier_class = "A Setup"
+            tier_reason = "Setup memiliki konfluensi struktur yang kuat dan dieksekusi dengan kepatuhan rencana yang baik."
+        elif adherence and outcome == "LOSS":
+            tier_class = "B Setup"
+            tier_reason = "Trade dieksekusi sesuai rencana SMC yang sah, namun mengalami variansi pergerakan pasar (kerugian 1R terukur)."
+        else:
+            tier_class = "C Setup"
+            tier_reason = "Terjadi pelanggaran kedisiplinan (Plan Adherence = TIDAK) atau eksekusi impulsif tanpa konfirmasi kriteria SMC secara utuh."
+
+        tier_review = (
+            f"• **Klasifikasi**: 🏆 **{tier_class}**\n"
+            f"• **Alasan Penilaian**: {tier_reason}"
+        )
+
         return f"""📌 **Analisis Eksekusi SMC & Order Flow Pasar**
 {summary}
 
@@ -763,6 +855,15 @@ Tuliskan evaluasi dalam 6 bagian Markdown terstruktur khas Mentor SMC Senior:
 
 🧠 **Audit Psikologi, Bias Mental & Adherensi Plan**
 {psych_review}
+
+🔍 **Refleksi Cara Berpikir Trader Profesional (5 Pertanyaan Kunci Mentor)**
+{pro_reflection_review}
+
+🎯 **Rapor Penilaian Mentor (Skala 1–10)**
+{scorecard_review}
+
+🏆 **Klasifikasi Tier Setup & Alasan Penilaian**
+{tier_review}
 
 📊 **Ekspektasi Matematik Jangka Panjang vs Variansi Acak**
 {hist_review}
@@ -988,6 +1089,9 @@ Tuliskan evaluasi dalam 6 bagian Markdown terstruktur khas Mentor SMC Senior:
         detailed_sc_breakdown_str = "\n".join(per_trade_sc_summary) if per_trade_sc_summary else "Belum ada foto chart diunggah pada transaksi minggu ini."
 
         prompt_text = f"""Anda adalah Master Institutional Smart Money Concepts (SMC) & ICT Elite Trading Mentor yang memiliki akses penuh ke seluruh data statistik murid Anda.
+PERSPEKTIF MENTOR & CARA BERPIKIR TRADER PROFESIONAL:
+• Anggap murid ini adalah trader yang ingin belajar berpikir seperti seorang trader profesional.
+• JANGAN HANYA MENUNJUKKAN KESALAHAN TRADER, tetapi berikan evaluasi mingguan yang objektif, motivatif, dan terstruktur.
 
 Berikan evaluasi audit kualitatif mingguan, analisis Edge Blueprint taksonomi setup (Pola Emas vs Leak Setup), audit Konteks Pasar Objektif Makro Crypto saat entry, DAN analisis per-foto chart visual struktur SMC ({start_date} s.d. {end_date}):
 
@@ -1011,15 +1115,31 @@ AUDIT KONTEKS PASAR OBJEKTIF (MARKET CONTEXT COLLECTOR):
 DOKUMENTASI FOTO CHART PER-TRANSAKSI MINGGU INI:
 {detailed_sc_breakdown_str}
 
-Formatkan audit mingguan dalam 8 bagian Markdown terstruktur khas Mentor SMC Senior:
+Formatkan audit mingguan dalam 11 bagian Markdown terstruktur khas Mentor SMC Senior:
 1. 📊 **Audit Performa Executive & Pertumbuhan Ekuitas R**
 2. 📉 **Pertumbuhan Ekuitas Akun Harian (Day-by-Day R Velocity)**
 3. ⚡ **Edge Blueprint & Audit Pola Taksonomi Setup (Pola Emas vs Leak Setup)**
-4. 🌍 **Konteks Pasar Objektif & Macro Collector (Sesi, HTF Trend, Fear & Greed)**
-5. 🖼️ **Audit Teknikal Foto Chart Per-Transaksi & Evaluasi Pola Visual (Per-Image SMC Structure Audit)**
-6. 📈 **Kualitas Dokumentasi Visual & Coverage Chart Mingguan**
-7. 🧠 **Review Psikologi, Kontrol Emosi & Kedisiplinan SMC**
-8. 💡 **3 Instruksi Emas Mentor SMC untuk Scaling Akun Minggu Depan**
+4. 🔍 **Refleksi Cara Berpikir Trader Profesional Mingguan (5 Evaluasi Kunci Mentor)**:
+   - **Mengapa Analisis/Pendekatan Salah (pada trade bocor/rugi)**: [Penjelasan]
+   - **Prinsip SMC yang Paling Sering Dilanggar Minggu Ini**: [Penjelasan]
+   - **Apa yang Seharusnya Dilihat Terlebih Dahulu Sebelum Entry**: [Penjelasan]
+   - **Apa yang Biasanya Trader Berpengalaman Lihat tetapi Terlewatkan**: [Penjelasan]
+   - **Pelajaran Terbesar Minggu Ini**: [Penjelasan]
+5. 🎯 **Rapor Penilaian Mingguan Mentor (Skala 1–10)**:
+   - Market Structure: X/10
+   - Liquidity Reading: X/10
+   - Bias: X/10
+   - Entry Timing: X/10
+   - Risk Management: X/10
+   - Keseluruhan Kualitas Setup Mingguan: X/10
+6. 🏆 **Klasifikasi Tier Setup Dominan Mingguan & Alasan Penilaian**:
+   - Klasifikasi Tier Dominan: [A+ Setup / A Setup / B Setup / C Setup]
+   - Alasan Penilaian Detail Mingguan
+7. 🌍 **Konteks Pasar Objektif & Macro Collector (Sesi, HTF Trend, Fear & Greed)**
+8. 🖼️ **Audit Teknikal Foto Chart Per-Transaksi & Evaluasi Pola Visual (Per-Image SMC Structure Audit)**
+9. 📈 **Kualitas Dokumentasi Visual & Coverage Chart Mingguan**
+10. 🧠 **Review Psikologi, Kontrol Emosi & Kedisiplinan SMC**
+11. 💡 **3 Instruksi Emas Mentor SMC untuk Scaling Akun Minggu Depan**
 
 Gunakan bahasa Indonesia yang tegas, bijak, profesional, mendalam, kaya terminologi SMC (Liquidity Sweeps, Discount/Premium, Order Block, FVG, 1R Risk), layaknya bimbingan privat dari mentor senior yang memegang data lengkap muridnya."""
 
@@ -1034,6 +1154,64 @@ Gunakan bahasa Indonesia yang tegas, bijak, profesional, mendalam, kaya terminol
         r_sign = "+" if total_r >= 0 else ""
         status_eval = "sangat presisi dan berdisiplin tinggi" if total_r > 0 else "memerlukan pembenahan kontrol risiko & disiplin SMC"
 
+        # Weekly Refleksi Cara Berpikir Trader Profesional
+        if total_r < 0 or win_rate < 50.0:
+            wk_why_wrong = "Beberapa posisi mengalami kebocoran ekuitas terutama akibat eksekusi posisi yang mendahului konfirmasi Liquidity Sweep di HTF atau memaksakan trade saat kondisi konsolidasi."
+            wk_smc_viol = "Pelanggaran terbanyak terjadi pada konfirmasi *HTF Alignment* dan eksekusi posisi sebelum pembentukan *Displacement / CHOCH* di LTF."
+            wk_should_see = "Seharusnya Anda memverifikasi arah Trend HTF 4H dan area Premium/Discount Zone secara disiplin di awal sesi trading."
+            wk_pros_see = "Trader profesional melihat struktur besar pasar (Macro Liquidity & Order Flow) dan tidak terpancing oleh fluktuasi candle kecil di pertengahan sesi."
+            wk_biggest_lesson = "Kedisiplinan menyeleksi setup dan menjaga 1R risk per trade jauh lebih berharga daripada jumlah frekuensi transaksi."
+        else:
+            wk_why_wrong = "Pendekatan trading minggu ini berjalan sangat efisien dengan kontrol risiko yang terjaga. Hambatan kecil hanya terjadi pada variansi normal pasar."
+            wk_smc_viol = "Prinsip SMC diterapkan secara konsisten tanpa pelanggaran kriteria utama."
+            wk_should_see = "Fokus utama diawali dari peta zonasi Liquidity Pool di HTF 4H."
+            wk_pros_see = "Trader profesional membiarkan R-Multiple tumbuh penuh dan hanya menggeser SL ke BE setelah pembentukan BOS terkonfirmasi."
+            wk_biggest_lesson = "Konsistensi eksekusi pada Setup Emas menghasilkan pertumbuhan ekuitas R yang eksponensial."
+
+        wk_pro_reflection_str = (
+            f"• **Mengapa Analisis/Pendekatan Salah (pada trade bocor)**: {wk_why_wrong}\n"
+            f"• **Prinsip SMC yang Paling Sering Dilanggar Minggu Ini**: {wk_smc_viol}\n"
+            f"• **Apa yang Seharusnya Dilihat Terlebih Dahulu**: {wk_should_see}\n"
+            f"• **Apa yang Dilihat Trader Berpengalaman tetapi Terlewatkan**: {wk_pros_see}\n"
+            f"• **Satu Pelajaran Terbesar Minggu Ini**: {wk_biggest_lesson}"
+        )
+
+        # Weekly Scorecard 1-10
+        wk_ms_score = 9 if aligned_htf_pct >= 70.0 else (7 if aligned_htf_pct >= 50.0 else 6)
+        wk_lr_score = 9 if win_rate >= 60.0 else (7 if win_rate >= 45.0 else 5)
+        wk_bias_score = 9 if wk_ms_score >= 8 else 6
+        wk_entry_score = 9 if total_r > 0 else 6
+        wk_rm_score = 10 if adherence_pct >= 85.0 else (8 if adherence_pct >= 70.0 else 5)
+        wk_overall_score = round((wk_ms_score + wk_lr_score + wk_bias_score + wk_entry_score + wk_rm_score) / 5, 1)
+
+        wk_scorecard_str = (
+            f"• **Market Structure**: {wk_ms_score}/10\n"
+            f"• **Liquidity Reading**: {wk_lr_score}/10\n"
+            f"• **Bias**: {wk_bias_score}/10\n"
+            f"• **Entry Timing**: {wk_entry_score}/10\n"
+            f"• **Risk Management**: {wk_rm_score}/10\n"
+            f"• **Keseluruhan Kualitas Setup Mingguan**: {wk_overall_score}/10"
+        )
+
+        # Weekly Tier Classification
+        if total_r >= 5.0 and adherence_pct >= 85.0:
+            wk_tier_class = "A+ Setup"
+            wk_tier_reason = f"Performa minggu ini luar biasa (+{total_r:.2f} R) dengan tingkat kepatuhan rencana tinggi ({adherence_pct:.1f}%)."
+        elif total_r > 0 and adherence_pct >= 75.0:
+            wk_tier_class = "A Setup"
+            wk_tier_reason = f"Performa positif (+{total_r:.2f} R) dengan eksekusi setup terstruktur dan disiplin risiko terjaga."
+        elif adherence_pct >= 70.0:
+            wk_tier_class = "B Setup"
+            wk_tier_reason = f"Kepatuhan rencana cukup baik ({adherence_pct:.1f}%), namun perlu penyempurnaan seleksi setup untuk menekan kebocoran ekuitas."
+        else:
+            wk_tier_class = "C Setup"
+            wk_tier_reason = f"Tingkat deviasi rencana tinggi (Plan Adherence hanya {adherence_pct:.1f}%). Diperlukan disiplin ketat dalam pengisian Quick-Tag."
+
+        wk_tier_str = (
+            f"• **Klasifikasi Tier Dominan Mingguan**: 🏆 **{wk_tier_class}**\n"
+            f"• **Alasan Penilaian Detail**: {wk_tier_reason}"
+        )
+
         return f"""### 🤖 Audit & Bimbingan Privat Mentor SMC Mingguan ({start_date} s/d {end_date})
 
 📊 **Audit Performa Executive & Pertumbuhan Ekuitas R**
@@ -1046,6 +1224,15 @@ Minggu ini Anda telah menyelesaikan **{total_trades} posisi transaksi** dengan *
 
 ⚡ **Edge Blueprint & Audit Pola Taksonomi Setup (Pola Emas vs Leak Setup)**
 {edge_taxonomy_str}
+
+🔍 **Refleksi Cara Berpikir Trader Profesional Mingguan (5 Evaluasi Kunci Mentor)**
+{wk_pro_reflection_str}
+
+🎯 **Rapor Penilaian Mingguan Mentor (Skala 1–10)**
+{wk_scorecard_str}
+
+🏆 **Klasifikasi Tier Setup Dominan Mingguan & Alasan Penilaian**
+{wk_tier_str}
 
 🌍 **Konteks Pasar Objektif & Macro Collector (Sesi, HTF Trend, Fear & Greed)**
 {macro_context_str}
