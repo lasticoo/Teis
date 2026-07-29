@@ -40,6 +40,7 @@ def test_single_trade_prompt_contains_all_mentor_framework_elements():
     assert "Rapor Penilaian Mentor (Skala 1–10)" in prompt
     assert "Kriteria Evaluasi" in prompt
     assert "Klasifikasi Tier Setup & Alasan Penilaian" in prompt
+    assert "Saran Konkret & Langkah Perbaikan Ke Depannya" in prompt
     assert "[A+ Setup / A Setup / B Setup / C Setup]" in prompt
 
     # Sample size caveat
@@ -48,6 +49,7 @@ def test_single_trade_prompt_contains_all_mentor_framework_elements():
 
     # 2. Test Fallback Review Output
     fallback = AICoachService._generate_analytic_fallback_review(dummy_data)
+    assert "Saran Konkret & Langkah Perbaikan Ke Depannya" in fallback
     assert "Refleksi Cara Berpikir Trader Profesional (5 Pertanyaan Kunci Mentor)" in fallback
     assert "Mengapa Analisis Salah" in fallback
     assert "Prinsip SMC yang Dilanggar" in fallback

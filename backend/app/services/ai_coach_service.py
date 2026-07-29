@@ -479,7 +479,7 @@ Evaluasi transaksi berikut secara kualitatif, teknikal, dan psikologis:
 • Expectancy Histori: {hist['expectancy_r']} R
 • Evaluasi Validitas Sampel: {stat_caveat}
 
-Tuliskan evaluasi dalam 9 bagian Markdown yang SANGAT RAPI, BERSIH, DAN ENAK DIBACA:
+Tuliskan evaluasi dalam 10 bagian Markdown yang SANGAT RAPI, BERSIH, DAN ENAK DIBACA:
 1. 📌 **Analisis Eksekusi SMC & Order Flow Pasar**
 2. 📈 **Analisis Teknikal Chart 4H / 1H & Validasi Tag Setup Terpilih [{tag_str}]**
    - Sertakan analisis visual chart **Before Entry** DAN **Chart AFTER Exit**.
@@ -501,6 +501,8 @@ Tuliskan evaluasi dalam 9 bagian Markdown yang SANGAT RAPI, BERSIH, DAN ENAK DIB
    - **Alasan Penilaian Detail**: [Penjelasan]
 8. 📊 **Ekspektasi Matematik Jangka Panjang vs Variansi Acak**
 9. 💡 **Instruksi Kunci Mentor SMC untuk Scaling Modal**
+10. 🚀 **Saran Konkret & Langkah Perbaikan Ke Depannya (Actionable Recommendations)**:
+   - Berikan poin-poin saran praktis, konkret, dan spesifik untuk mentor memberikan panduan perbaikan eksekusi, entry timing, konfluensi, dan manajemen emosi trader pada trade-trade berikutnya ke depannya.
 """.strip()
 
         return prompt_text, image_payloads
@@ -1055,6 +1057,13 @@ Tuliskan evaluasi dalam 9 bagian Markdown yang SANGAT RAPI, BERSIH, DAN ENAK DIB
             f"• **Alasan Penilaian**: {tier_reason}"
         )
 
+        future_recs = [
+            f"• **Entry Timing & Konfluensi**: {'Tunggu pembentukan LTF Liquidity Sweep & CHOCH di POI 4H sebelum menekan tombol order' if outcome == 'LOSS' else 'Pertahankan kedisiplinan penantian POI HTF dan hindari mengejar candle impulsif'}.",
+            f"• **Manajemen Risiko 1R**: {'Tetapkan Stop Loss sedikit di luar titik Invalidation Point/High-Low terbaru untuk menghindari wicking' if not adherence or outcome == 'LOSS' else 'Kunci profit secara bertahap saat R-Multiple melampaui +2R dan geser SL ke Breakeven setelah BOS baru'}.",
+            f"• **Penguatan Disiplin Plan**: {'Lengkapi 100% kriteria Quick-Tag sebelum order dibuka demi mengeliminasi bias emosional/FOMO' if not adherence else 'Jaga konsistensi kepatuhan rencana (Plan Adherence = YA) pada setiap transaksi berikutnya'}.",
+            f"• **Akumulasi Edge Statistik**: Terus kumpulkan data hingga minimal {cls.MIN_SAMPLE_SIZE_FOR_EDGE_CLAIM} trade bertag [{setup_str}] untuk memvalidasi ekspektasi matematis R-Multiple."
+        ]
+
         return f"""📌 **Analisis Eksekusi SMC & Order Flow Pasar**
 {summary}
 
@@ -1081,6 +1090,9 @@ Tuliskan evaluasi dalam 9 bagian Markdown yang SANGAT RAPI, BERSIH, DAN ENAK DIB
 
 💡 **Instruksi Kunci Mentor SMC untuk Scaling Modal**
 {chr(10).join(takeaways)}
+
+🚀 **Saran Konkret & Langkah Perbaikan Ke Depannya (Actionable Recommendations)**
+{chr(10).join(future_recs)}
 """.strip()
 
     @classmethod
