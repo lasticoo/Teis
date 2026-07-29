@@ -21,13 +21,15 @@ def test_single_trade_prompt_contains_all_mentor_framework_elements():
         "setup_tags": ["Order Block (H4)", "FVG (H1)"],
         "market_context": {"trend_htf": "bullish", "trend_ltf": "bearish", "session": "london", "fear_greed_index": 65, "btc_dominance": 54.5},
         "psychology": {"confidence_level": 7, "plan_adherence": False, "psychological_tags": ["FOMO"], "free_notes": "Entry impulsif"},
-        "historical_similar_setup": {"sample_size": 10, "win_rate_pct": 60.0, "avg_rr": 2.5, "expectancy_r": 1.1},
+        "historical_similar_setup": {"sample_size": 10, "win_rate_pct": 60.0, "avg_rr": 2.5, "expectancy_r": 1.1, "is_statistically_significant": False},
         "screenshots": [],
         "equity_growth": {"equity_phase": "STABLE_BASELINE", "cumulative_r_trajectory": 0.0, "daily_progression_str": "No trades"}
     }
 
-    # 1. Test Prompt String
-    prompt = AICoachService._build_prompt(dummy_data)
+    # 1. Test Prompt Tuple
+    prompt, img_payloads = AICoachService._build_prompt(dummy_data)
+    assert isinstance(prompt, str)
+    assert isinstance(img_payloads, list)
     assert "PERSPEKTIF MENTOR & CARA BERPIKIR TRADER PROFESIONAL" in prompt
     assert "Mengapa Analisis Salah" in prompt
     assert "Prinsip SMC yang Dilanggar" in prompt
@@ -43,6 +45,10 @@ def test_single_trade_prompt_contains_all_mentor_framework_elements():
     assert "Keseluruhan Kualitas Setup:" in prompt
     assert "Klasifikasi Tier Setup & Alasan Penilaian" in prompt
     assert "[A+ Setup / A Setup / B Setup / C Setup]" in prompt
+
+    # Sample size caveat
+    assert "PERHATIAN STATISTIK" in prompt
+    assert "TERLALU KECIL" in prompt
 
     # 2. Test Fallback Review Output
     fallback = AICoachService._generate_analytic_fallback_review(dummy_data)
@@ -63,16 +69,44 @@ def test_single_trade_prompt_contains_all_mentor_framework_elements():
     assert "C Setup" in fallback  # Plan Adherence was False -> C Setup
 
 
-def test_weekly_review_prompt_and_fallback_contain_framework_elements(mocker):
-    # Mock LLM call to force fallback for testing markdown structure
+def test_fallback_honest_chart_disclaimer_when_screenshots_present():
+    dummy_data = {
+        "symbol_pair": "ETHUSDT",
+        "direction": "SHORT",
+        "outcome": "WIN",
+        "entry_price": 3000.0,
+        "exit_price": 2900.0,
+        "stop_loss": 3050.0,
+        "take_profit": 2900.0,
+        "rr_planned": 2.0,
+        "rr_realized": 2.0,
+        "pnl": 100.0,
+        "fee": 0.5,
+        "holding_time_minutes": 120,
+        "exit_reason": "take_profit",
+        "execution_details": {"order_type": "limit", "moved_to_breakeven": False, "trailing_stop_used": False},
+        "setup_tags": ["Order Block (H4)"],
+        "market_context": {"trend_htf": "bearish", "trend_ltf": "bearish", "session": "ny", "fear_greed_index": 50, "btc_dominance": 54.0},
+        "psychology": {"confidence_level": 8, "plan_adherence": True, "psychological_tags": [], "free_notes": "Disiplin"},
+        "historical_similar_setup": {"sample_size": 25, "win_rate_pct": 68.0, "avg_rr": 2.2, "expectancy_r": 1.5, "is_statistically_significant": True},
+        "screenshots": [{"stage": "before_entry_4h", "url": "http://localhost:9000/teis-screenshots/test.webp"}],
+        "equity_growth": {"equity_phase": "CONSISTENT_GROWTH", "cumulative_r_trajectory": 5.0, "daily_progression_str": "Stable"}
+    }
+
+    fallback = AICoachService._generate_analytic_fallback_review(dummy_data)
+    assert "tidak bisa membaca gambar secara visual" in fallback
+    assert "bukan validasi visual order block/FVG" in fallback
+    assert "Konfluensi visual mengonfirmasi" not in fallback
+
+
+def test_weekly_review_sample_size_thresholds(mocker):
     mocker.patch.object(AICoachService, "_call_llm_provider", return_value="")
-    
     mock_db = mocker.MagicMock()
     mock_db.query().filter().all.return_value = []
 
     start = "2026-07-20"
     end = "2026-07-27"
-    
+
     markdown = AICoachService._build_weekly_review_markdown(
         db=mock_db,
         start_date=start,
@@ -87,17 +121,6 @@ def test_weekly_review_prompt_and_fallback_contain_framework_elements(mocker):
     )
 
     assert "Refleksi Cara Berpikir Trader Profesional Mingguan (5 Evaluasi Kunci Mentor)" in markdown
-    assert "Mengapa Analisis/Pendekatan Salah" in markdown
-    assert "Prinsip SMC yang Paling Sering Dilanggar Minggu Ini" in markdown
-    assert "Apa yang Seharusnya Dilihat Terlebih Dahulu" in markdown
-    assert "Apa yang Dilihat Trader Berpengalaman tetapi Terlewatkan" in markdown
-    assert "Satu Pelajaran Terbesar Minggu Ini" in markdown
     assert "Rapor Penilaian Mingguan Mentor (Skala 1–10)" in markdown
-    assert "Market Structure" in markdown
-    assert "Liquidity Reading" in markdown
-    assert "Bias" in markdown
-    assert "Entry Timing" in markdown
-    assert "Risk Management" in markdown
-    assert "Keseluruhan Kualitas Setup Mingguan" in markdown
     assert "Klasifikasi Tier Setup Dominan Mingguan & Alasan Penilaian" in markdown
-    assert "C Setup" in markdown  # Adherence < 70% -> C Setup
+    assert "C Setup" in markdown

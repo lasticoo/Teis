@@ -5,7 +5,7 @@ import requests
 import numpy as np
 from datetime import datetime
 from decimal import Decimal
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -25,6 +25,52 @@ class AICoachService:
     Compares current trade performance with historical metrics of similar setup tags while
     strictly anonymizing raw account balances, API credentials, leverage, and raw margin USD.
     """
+
+    MIN_SAMPLE_SIZE_FOR_EDGE_CLAIM: int = 20
+    MIN_SAMPLE_SIZE_FOR_CAUTIOUS_NOTE: int = 5
+
+    @classmethod
+    def _fetch_image_as_base64(cls, url: str) -> Optional[Dict[str, str]]:
+        """
+        Downloads image bytes from MinIO/Storage URL (handling Docker internal vs localhost),
+        encodes it into base64, and returns a dict with mime_type, base64 data, and url.
+        Gracefully returns None on failure.
+        """
+        import base64
+        if not url:
+            return None
+
+        urls_to_try = [url]
+        if "localhost:9000" in url:
+            urls_to_try.append(url.replace("localhost:9000", "minio:9000"))
+        elif "minio:9000" in url:
+            urls_to_try.append(url.replace("minio:9000", "localhost:9000"))
+
+        for u in urls_to_try:
+            try:
+                res = requests.get(u, timeout=4)
+                if res.status_code == 200 and res.content:
+                    content_type = res.headers.get("Content-Type", "").lower()
+                    if "webp" in content_type or u.endswith(".webp"):
+                        mime_type = "image/webp"
+                    elif "png" in content_type or u.endswith(".png"):
+                        mime_type = "image/png"
+                    elif "jpg" in content_type or "jpeg" in content_type or u.endswith(".jpg") or u.endswith(".jpeg"):
+                        mime_type = "image/jpeg"
+                    else:
+                        mime_type = "image/webp"
+
+                    b64_str = base64.b64encode(res.content).decode("utf-8")
+                    return {
+                        "mime_type": mime_type,
+                        "base64": b64_str,
+                        "url": u
+                    }
+            except Exception as e:
+                logger.debug(f"Image fetch attempt for {u} failed: {e}")
+                continue
+
+        return None
 
     @classmethod
     def generate_trade_review(cls, db: Session, trade_id: str) -> Dict[str, Any]:
@@ -93,11 +139,11 @@ class AICoachService:
             equity_growth=equity_growth
         )
 
-        # 8. Build Prompt
-        prompt_text = cls._build_prompt(anonymized_payload)
+        # 8. Build Prompt & Image Payloads
+        prompt_text, image_payloads = cls._build_prompt(anonymized_payload)
 
-        # 9. Call LLM Provider (OpenAI / Ollama / Gemini / Fallback Engine)
-        review_text = cls._call_llm_provider(prompt_text, anonymized_payload)
+        # 9. Call LLM Provider (Vision-capable when images available, else text-only / fallback)
+        review_text = cls._call_llm_provider(prompt_text, anonymized_payload, image_payloads=image_payloads)
 
         # 10. Save to Dedicated DB Table (`ai_coach_reviews`)
         existing_review = db.query(AICoachReview).filter(AICoachReview.trade_id == trade_id).first()
@@ -205,7 +251,13 @@ class AICoachService:
         Fetches historical performance metrics for trades sharing identical setup tags.
         """
         if not setup_tags:
-            return {"sample_size": 0, "win_rate_pct": 0.0, "avg_rr": 0.0, "expectancy_r": 0.0}
+            return {
+                "sample_size": 0,
+                "win_rate_pct": 0.0,
+                "avg_rr": 0.0,
+                "expectancy_r": 0.0,
+                "is_statistically_significant": False
+            }
 
         placeholders = ", ".join([f"'{t}'" for t in setup_tags])
         tag_count = len(setup_tags)
@@ -225,7 +277,13 @@ class AICoachService:
         sample_size = len(rows)
 
         if sample_size == 0:
-            return {"sample_size": 0, "win_rate_pct": 0.0, "avg_rr": 0.0, "expectancy_r": 0.0}
+            return {
+                "sample_size": 0,
+                "win_rate_pct": 0.0,
+                "avg_rr": 0.0,
+                "expectancy_r": 0.0,
+                "is_statistically_significant": False
+            }
 
         wins = sum(1 for r in rows if float(r.pnl or 0) > 0)
         win_rate_pct = round((wins / sample_size) * 100.0, 2)
@@ -242,7 +300,8 @@ class AICoachService:
             "sample_size": sample_size,
             "win_rate_pct": win_rate_pct,
             "avg_rr": avg_rr,
-            "expectancy_r": expectancy_r
+            "expectancy_r": expectancy_r,
+            "is_statistically_significant": sample_size >= cls.MIN_SAMPLE_SIZE_FOR_EDGE_CLAIM
         }
 
     @classmethod
@@ -316,9 +375,10 @@ class AICoachService:
         }
 
     @classmethod
-    def _build_prompt(cls, data: Dict[str, Any]) -> str:
+    def _build_prompt(cls, data: Dict[str, Any]) -> Tuple[str, List[Dict[str, Any]]]:
         """
-        Constructs an elite Master SMC Institutional Trading Coach evaluation prompt.
+        Constructs an elite Master SMC Institutional Trading Coach evaluation prompt
+        and gathers base64 image payloads for vision-capable models.
         """
         hist = data["historical_similar_setup"]
         psych = data["psychology"]
@@ -329,18 +389,38 @@ class AICoachService:
         exec_det = data.get("execution_details", {})
         eq_growth = data.get("equity_growth", {})
 
+        image_payloads = []
         sc_summary = []
         for s in screenshots:
             stage_name = "Chart 4H HTF" if s["stage"] == "before_entry_4h" else ("Chart 1H LTF" if s["stage"] == "before_entry_1h" else "Chart Exit Target")
             sc_summary.append(f"• {stage_name}: URL={s['url']}")
+            b64_info = cls._fetch_image_as_base64(s["url"])
+            if b64_info:
+                b64_info["stage"] = s["stage"]
+                image_payloads.append(b64_info)
+
         sc_text = "\n".join(sc_summary) if sc_summary else "Belum ada foto chart diunggah di jurnal ini."
 
-        return f"""
+        sample_sz = hist.get("sample_size", 0)
+        is_sig = hist.get("is_statistically_significant", False)
+        if not is_sig:
+            stat_caveat = (
+                f"⚠️ PERHATIAN STATISTIK: Sampel historis untuk setup ini baru {sample_sz} trade — "
+                f"TERLALU KECIL untuk dianggap edge statistik yang valid (syarat minimum n >= {cls.MIN_SAMPLE_SIZE_FOR_EDGE_CLAIM}). "
+                f"Jangan pernah menyimpulkan setup ini 'terbukti profitable' atau 'terbukti lemah' dari sampel sekecil ini. "
+                f"Sampaikan angka apa adanya sebagai observasi awal, bukan kesimpulan."
+            )
+        else:
+            stat_caveat = f"✅ Sampel historis mencukupi ({sample_sz} trade >= {cls.MIN_SAMPLE_SIZE_FOR_EDGE_CLAIM}). Data statistik valid untuk evaluasi edge."
+
+        prompt_text = f"""
 Anda adalah Master Institutional SMC (Smart Money Concepts) & ICT Elite Trading Mentor yang telah terbukti sukses menumbuhkan modal kecil menjadi portofolio besar secara konsisten melalui eksekusi presisi tinggi dan disiplin risiko 1R ekuitas.
 
 PERSPEKTIF MENTOR & CARA BERPIKIR TRADER PROFESIONAL:
 • Anggap trader ini adalah murid Anda yang ingin belajar berpikir seperti seorang trader profesional.
 • JANGAN HANYA MENUNJUKKAN KESALAHAN TRADER, tetapi berikan pembimbingan konstruktif, objektif, tajam, dan mendalam.
+• Jangan pernah memberi pujian atau pembenaran otomatis hanya karena hasil trade positif. Nilai KUALITAS PROSES eksekusi secara independen dari hasil P&L. Jika proses entry lemah meski untung, katakan itu terus terang.
+• Jangan pernah menyebut suatu setup sebagai 'terbukti', 'edge kuat', atau menyarankan 'scale up/double down' jika sample size di bawah {cls.MIN_SAMPLE_SIZE_FOR_EDGE_CLAIM} trade.
 
 Evaluasi transaksi berikut secara kualitatif, teknikal, dan psikologis:
 
@@ -378,6 +458,7 @@ Evaluasi transaksi berikut secara kualitatif, teknikal, dan psikologis:
 • Win Rate Histori Setup Ini: {hist['win_rate_pct']}%
 • Rata-rata RR Histori: {hist['avg_rr']} R
 • Expectancy Histori: {hist['expectancy_r']} R
+• Evaluasi Validitas Sampel: {stat_caveat}
 
 Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
 1. 📌 **Analisis Eksekusi SMC & Order Flow Pasar**
@@ -404,43 +485,141 @@ Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
 9. 💡 **Instruksi Kunci Mentor SMC untuk Scaling Modal**
 """.strip()
 
+        return prompt_text, image_payloads
+
     @classmethod
-    def _call_llm_provider(cls, prompt_text: str, data: Dict[str, Any]) -> str:
+    def _call_llm_provider(
+        cls,
+        prompt_text: str,
+        data: Dict[str, Any],
+        image_payloads: Optional[List[Dict[str, Any]]] = None
+    ) -> str:
         """
-        Dispatches prompt to configured LLM provider (Groq / OpenRouter / DeepSeek / Together AI / OpenAI / Gemini / Ollama / Fallback Coach Engine).
+        Dispatches prompt to configured LLM provider.
+        Supports Multimodal Vision payloads when image_payloads is provided.
         """
         system_prompt = (
             "Anda adalah Master Institutional Smart Money Concepts (SMC) & ICT Elite Trading Mentor "
-            "berpengalaman 12+ tahun yang terbukti sukses mengubah akun modal kecil menjadi portofolio "
-            "skala besar melalui manajemen risiko 1R ekuitas yang ketat, eksekusi Liquidity Sweeps, "
-            "Order Block (OB) mitigation, FVG Imbalances, Inducement, dan HTF Confluence. "
-            "Berikan analisis dan bimbingan kualitatif yang sangat tajam, bijak, realistis, dan jujur "
-            "layaknya mentor pribadi profesional yang duduk tepat di samping trader."
+            "berpengalaman 12+ tahun yang terbukti sukses menumbuhkan akun modal kecil secara konsisten.\n"
+            "PRINSIP KRITIS EVALUASI MENTOR:\n"
+            "1. Jangan pernah memberi pujian atau pembenaran otomatis hanya karena hasil trade positif. "
+            "Nilai KUALITAS PROSES eksekusi secara independen dari hasil P&L. Jika proses entry lemah "
+            "meski untung, katakan itu terus terang. Jika proses sudah benar meski rugi, jelaskan itu "
+            "sebagai variansi wajar — tapi jangan gunakan frasa itu sebagai tameng otomatis untuk semua kerugian.\n"
+            "2. Jangan pernah menyebut suatu setup sebagai 'terbukti', 'edge kuat', atau menyarankan "
+            "'scale up/double down' jika sample size di bawah 20 trade. Untuk sample di bawah 20 trade, "
+            "gunakan bahasa observasional yang hati-hati dan tegaskan bahwa sampel masih terlalu kecil."
         )
 
-        # Option 1: Groq Cloud API (Super-fast, Llama 3.3 70B & DeepSeek R1)
+        has_images = bool(image_payloads)
+
+        def _make_openai_messages():
+            if not has_images:
+                return [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt_text}
+                ]
+
+            user_content = [{"type": "text", "text": prompt_text}]
+            for img in image_payloads:
+                user_content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{img['mime_type']};base64,{img['base64']}"
+                    }
+                })
+            return [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ]
+
+        # ----------------------------------------------------
+        # PRIORITY 1: Vision Providers (when screenshots exist)
+        # ----------------------------------------------------
+
+        # Option A: OpenAI API (gpt-4o-mini / gpt-4o)
+        openai_key = getattr(settings, "OPENAI_API_KEY", None) or os.environ.get("OPENAI_API_KEY")
+        if openai_key and len(str(openai_key)) > 5:
+            try:
+                model_name = getattr(settings, "LLM_MODEL", "gpt-4o-mini")
+                logger.info(f"Calling OpenAI API ({model_name}) {'with Vision' if has_images else ''}...")
+                res = requests.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": model_name,
+                        "messages": _make_openai_messages(),
+                        "temperature": 0.3,
+                        "max_tokens": 1400
+                    },
+                    timeout=18
+                )
+                if res.status_code == 200:
+                    content = res.json()["choices"][0]["message"]["content"]
+                    if content and len(content.strip()) > 10:
+                        logger.info("✅ OpenAI API review successfully generated!")
+                        return content
+            except Exception as e:
+                logger.warning(f"OpenAI API call failed: {e}")
+
+        # Option B: Gemini API (gemini-2.0-flash, gemini-1.5-flash)
+        gemini_key = getattr(settings, "GEMINI_API_KEY", None) or os.environ.get("GEMINI_API_KEY")
+        if gemini_key and len(str(gemini_key)) > 5:
+            models_to_try = [
+                getattr(settings, "LLM_MODEL", "gemini-2.0-flash"),
+                "gemini-2.0-flash",
+                "gemini-2.0-flash-lite",
+                "gemini-1.5-flash"
+            ]
+            for model_name in models_to_try:
+                try:
+                    logger.info(f"Calling Gemini API ({model_name}) {'with Vision' if has_images else ''}...")
+                    parts = [{"text": f"{system_prompt}\n\n{prompt_text}"}]
+                    if has_images:
+                        for img in image_payloads:
+                            parts.append({
+                                "inline_data": {
+                                    "mime_type": img["mime_type"],
+                                    "data": img["base64"]
+                                }
+                            })
+
+                    res = requests.post(
+                        f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
+                        headers={"Content-Type": "application/json", "X-goog-api-key": gemini_key},
+                        json={"contents": [{"parts": parts}]},
+                        timeout=18
+                    )
+                    if res.status_code == 200:
+                        candidates = res.json().get("candidates", [])
+                        if candidates and candidates[0].get("content", {}).get("parts"):
+                            content = candidates[0]["content"]["parts"][0]["text"]
+                            if content and len(content.strip()) > 10:
+                                logger.info(f"✅ Gemini API ({model_name}) review successfully generated!")
+                                return content
+                    elif res.status_code == 429:
+                        logger.warning(f"Gemini API ({model_name}) Quota Exceeded (429)")
+                        break
+                except Exception as e:
+                    logger.warning(f"Gemini API call ({model_name}) failed: {e}")
+
+        # Option C: Groq Cloud API
         groq_key = getattr(settings, "GROQ_API_KEY", None) or os.environ.get("GROQ_API_KEY")
         if groq_key and len(str(groq_key)) > 5:
-            groq_models = ["llama-3.3-70b-versatile", "deepseek-r1-distill-llama-70b", "gemma2-9b-it"]
+            groq_models = ["llama-3.2-90b-vision-preview", "llama-3.2-11b-vision-preview"] if has_images else ["llama-3.3-70b-versatile", "deepseek-r1-distill-llama-70b", "gemma2-9b-it"]
             for model_id in groq_models:
                 try:
-                    logger.info(f"Calling Groq Cloud API ({model_id}) for AI Coach review...")
+                    logger.info(f"Calling Groq Cloud API ({model_id}) {'with Vision' if has_images else ''}...")
                     res = requests.post(
                         "https://api.groq.com/openai/v1/chat/completions",
-                        headers={
-                            "Authorization": f"Bearer {groq_key}",
-                            "Content-Type": "application/json"
-                        },
+                        headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
                         json={
                             "model": model_id,
-                            "messages": [
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": prompt_text}
-                            ],
+                            "messages": _make_openai_messages(),
                             "temperature": 0.3,
-                            "max_tokens": 1200
+                            "max_tokens": 1400
                         },
-                        timeout=12
+                        timeout=15
                     )
                     if res.status_code == 200:
                         choices = res.json().get("choices", [])
@@ -449,23 +628,16 @@ Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
                             if len(content.strip()) > 10:
                                 logger.info(f"✅ Groq API ({model_id}) review successfully generated!")
                                 return content
-                    else:
-                        logger.warning(f"Groq API ({model_id}) status {res.status_code}: {res.text[:200]}")
                 except Exception as e:
-                    logger.warning(f"Groq API call ({model_id}) failed: {e}.")
+                    logger.warning(f"Groq API call ({model_id}) failed: {e}")
 
-        # Option 2: OpenRouter Free API
+        # Option D: OpenRouter API
         openrouter_key = getattr(settings, "OPENROUTER_API_KEY", None) or os.environ.get("OPENROUTER_API_KEY")
         if openrouter_key and len(str(openrouter_key)) > 5:
-            openrouter_models = [
-                "inclusionai/ling-3.0-flash:free",
-                "google/gemma-4-31b-it:free",
-                "poolside/laguna-s-2.1:free",
-                "openrouter/free"
-            ]
+            openrouter_models = ["meta-llama/llama-3.2-11b-vision-instruct:free", "google/gemma-4-31b-it:free", "openrouter/free"] if has_images else ["inclusionai/ling-3.0-flash:free", "google/gemma-4-31b-it:free", "openrouter/free"]
             for model_id in openrouter_models:
                 try:
-                    logger.info(f"Calling OpenRouter API ({model_id}) for AI Coach review...")
+                    logger.info(f"Calling OpenRouter API ({model_id}) {'with Vision' if has_images else ''}...")
                     res = requests.post(
                         "https://openrouter.ai/api/v1/chat/completions",
                         headers={
@@ -476,12 +648,9 @@ Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
                         },
                         json={
                             "model": model_id,
-                            "messages": [
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": prompt_text}
-                            ],
+                            "messages": _make_openai_messages(),
                             "temperature": 0.3,
-                            "max_tokens": 1200
+                            "max_tokens": 1400
                         },
                         timeout=15
                     )
@@ -492,22 +661,21 @@ Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
                             if len(content.strip()) > 10:
                                 logger.info(f"✅ OpenRouter API ({model_id}) review successfully generated!")
                                 return content
-                    else:
-                        logger.warning(f"OpenRouter API ({model_id}) status {res.status_code}: {res.text[:200]}")
                 except Exception as e:
-                    logger.warning(f"OpenRouter API call ({model_id}) failed: {e}.")
+                    logger.warning(f"OpenRouter API call ({model_id}) failed: {e}")
 
-        # Option 3: DeepSeek Official API
+        # ----------------------------------------------------
+        # PRIORITY 2: Text Providers (Fallback for text)
+        # ----------------------------------------------------
+
+        # DeepSeek Official API (Text-only)
         deepseek_key = getattr(settings, "DEEPSEEK_API_KEY", None) or os.environ.get("DEEPSEEK_API_KEY")
         if deepseek_key and len(str(deepseek_key)) > 5:
             try:
                 logger.info("Calling DeepSeek Official API for AI Coach review...")
                 res = requests.post(
                     "https://api.deepseek.com/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {deepseek_key}",
-                        "Content-Type": "application/json"
-                    },
+                    headers={"Authorization": f"Bearer {deepseek_key}", "Content-Type": "application/json"},
                     json={
                         "model": "deepseek-chat",
                         "messages": [
@@ -515,7 +683,7 @@ Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
                             {"role": "user", "content": prompt_text}
                         ],
                         "temperature": 0.3,
-                        "max_tokens": 1200
+                        "max_tokens": 1400
                     },
                     timeout=15
                 )
@@ -523,22 +691,17 @@ Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
                     choices = res.json().get("choices", [])
                     if choices and choices[0].get("message", {}).get("content"):
                         return choices[0]["message"]["content"]
-                else:
-                    logger.warning(f"DeepSeek API status {res.status_code}: {res.text[:200]}")
             except Exception as e:
-                logger.warning(f"DeepSeek API call failed: {e}.")
+                logger.warning(f"DeepSeek API call failed: {e}")
 
-        # Option 4: Together AI API
+        # Together AI API (Text)
         together_key = getattr(settings, "TOGETHER_API_KEY", None) or os.environ.get("TOGETHER_API_KEY")
         if together_key and len(str(together_key)) > 5:
             try:
                 logger.info("Calling Together AI API for AI Coach review...")
                 res = requests.post(
                     "https://api.together.xyz/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {together_key}",
-                        "Content-Type": "application/json"
-                    },
+                    headers={"Authorization": f"Bearer {together_key}", "Content-Type": "application/json"},
                     json={
                         "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
                         "messages": [
@@ -546,7 +709,7 @@ Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
                             {"role": "user", "content": prompt_text}
                         ],
                         "temperature": 0.3,
-                        "max_tokens": 1200
+                        "max_tokens": 1400
                     },
                     timeout=15
                 )
@@ -554,39 +717,10 @@ Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
                     choices = res.json().get("choices", [])
                     if choices and choices[0].get("message", {}).get("content"):
                         return choices[0]["message"]["content"]
-                else:
-                    logger.warning(f"Together AI API status {res.status_code}: {res.text[:200]}")
             except Exception as e:
-                logger.warning(f"Together AI API call failed: {e}.")
+                logger.warning(f"Together AI API call failed: {e}")
 
-        # Option 5: OpenAI GPT API
-        openai_key = getattr(settings, "OPENAI_API_KEY", None)
-        if openai_key and len(str(openai_key)) > 5:
-            try:
-                logger.info("Calling OpenAI GPT API for AI Coach review...")
-                res = requests.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {openai_key}",
-                        "Content-Type": "application/json"
-                    },
-                    json={
-                        "model": getattr(settings, "LLM_MODEL", "gpt-4o-mini"),
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": prompt_text}
-                        ],
-                        "temperature": 0.3,
-                        "max_tokens": 1000
-                    },
-                    timeout=15
-                )
-                if res.status_code == 200:
-                    return res.json()["choices"][0]["message"]["content"]
-            except Exception as e:
-                logger.warning(f"OpenAI API call failed: {e}. Falling back to alternate provider.")
-
-        # Option 6: Ollama Local LLM
+        # Ollama Local LLM
         ollama_host = getattr(settings, "OLLAMA_HOST", None)
         if ollama_host:
             try:
@@ -603,42 +737,11 @@ Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
                 if res.status_code == 200:
                     return res.json().get("response", "")
             except Exception as e:
-                logger.warning(f"Ollama API call failed: {e}. Falling back to Coach Engine.")
+                logger.warning(f"Ollama API call failed: {e}")
 
-        # Option 7: Gemini API
-        gemini_key = getattr(settings, "GEMINI_API_KEY", None) or os.environ.get("GEMINI_API_KEY")
-        if gemini_key and len(str(gemini_key)) > 5:
-            models_to_try = [
-                getattr(settings, "LLM_MODEL", "gemini-2.0-flash"),
-                "gemini-2.0-flash",
-                "gemini-2.0-flash-lite",
-                "gemini-1.5-flash"
-            ]
-            for model_name in models_to_try:
-                try:
-                    logger.info(f"Calling Gemini API ({model_name}) for AI Coach review...")
-                    res = requests.post(
-                        f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
-                        headers={
-                            "Content-Type": "application/json",
-                            "X-goog-api-key": gemini_key
-                        },
-                        json={
-                            "contents": [{"parts": [{"text": f"{system_prompt}\n\n{prompt_text}"}]}]
-                        },
-                        timeout=15
-                    )
-                    if res.status_code == 200:
-                        candidates = res.json().get("candidates", [])
-                        if candidates:
-                            return candidates[0]["content"]["parts"][0]["text"]
-                    elif res.status_code == 429:
-                        logger.warning(f"Gemini API ({model_name}) Quota Exceeded (429): {res.text[:200]}")
-                        break
-                except Exception as e:
-                    logger.warning(f"Gemini API call ({model_name}) failed: {e}.")
-
-        # Option 8: Master SMC Analytic AI Coach Fallback Engine
+        # ----------------------------------------------------
+        # PRIORITY 3: Fallback Engine
+        # ----------------------------------------------------
         logger.info("⚡ Executing Master SMC Analytic AI Coach Fallback Engine...")
         return cls._generate_analytic_fallback_review(data)
 
@@ -652,7 +755,8 @@ Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
         rr = data["rr_realized"]
         pair = data["symbol_pair"]
         direction = data["direction"]
-        setup_str = ", ".join(data["setup_tags"]) if data["setup_tags"] else "Order Block / Liquidity Sweep / FVG"
+        setup_tags = data.get("setup_tags", [])
+        setup_str = ", ".join(setup_tags) if setup_tags else "Order Block / Liquidity Sweep / FVG"
         psych = data["psychology"]
         hist = data["historical_similar_setup"]
         mkt = data["market_context"]
@@ -661,14 +765,37 @@ Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
         psych_tags = ", ".join(psych["psychological_tags"]) if psych["psychological_tags"] else "Stabil (Terfungsi sempurna)"
         exit_reason = data.get("exit_reason", "N/A")
         holding_mins = data.get("holding_time_minutes", 0)
+        exec_det = data.get("execution_details", {})
+        rr_planned = data.get("rr_planned")
 
-        # 1. Executive Summary & Duration Dynamics
-        if outcome == "WIN":
-            summary = f"🔥 **Eksekusi Presisi SMC**: Posisi **{direction} {pair}** berhasil memanen profit **+{rr} R**. Struktur pergerakan *Smart Money Order Flow* berjalan efisien memenuhi area *liquidity target* Anda."
-        elif outcome == "LOSS":
-            summary = f"🛡️ **Proteksi Modal Teruji**: Posisi **{direction} {pair}** menyentuh Stop Loss sebesar **{rr} R**. Ingat prinsip utama menumbuhkan modal kecil: *1R loss adalah biaya bisnis wajib untuk memburu kemenangan 2R hingga 5R+ saat Liquidity Sweep terkonfirmasi*."
-        else:
-            summary = f"⚖️ **Breakeven Defense**: Posisi **{direction} {pair}** ditutup pada **0 R**. Pengamanan posisi di titik Breakeven (*BE Move*) berhasil melindungi modal dari pergerakan pembalikan tak terduga."
+        htf = mkt.get("trend_htf", "N/A")
+        ltf = mkt.get("trend_ltf", "N/A")
+        is_aligned_htf = (htf != "N/A" and ((direction == "LONG" and htf.lower() == "bullish") or (direction == "SHORT" and htf.lower() == "bearish")))
+        is_counter_htf = (htf != "N/A" and ((direction == "LONG" and htf.lower() == "bearish") or (direction == "SHORT" and htf.lower() == "bullish")))
+
+        # 1. Executive Summary & Dynamic Sub-variations
+        if outcome == "LOSS":
+            if is_counter_htf:
+                summary = f"⚠️ **Kebocoran Counter-Trend**: Posisi **{direction} {pair}** dieksekusi melawan Trend HTF 4H ({htf.upper()}) dan menyentuh SL ({rr} R). Memotong arus besar institusional tanpa konfirmasi Liquidity Sweep HTF adalah penyebab utama kerugian."
+            elif holding_mins < 15:
+                summary = f"⚡ **Entry Impulsif Kilat**: Posisi **{direction} {pair}** hanya bertahan {holding_mins} menit sebelum menyentuh SL ({rr} R). Entry dilakukan terlalu terburu-buru tanpa menunggu pembentukan CHOCH/BOS LTF."
+            elif exit_reason == "manual_close":
+                summary = f"✋ **Manual Cut Loss Prematur**: Posisi **{direction} {pair}** ditutup manual sebelum menyentuh Stop Loss asli. Keputusan berbasis cemas mengacaukan manajemen risiko 1R."
+            elif not adherence:
+                summary = f"🚫 **Deviasi Rencana Trading**: Posisi **{direction} {pair}** menyentuh SL ({rr} R) akibat entry di luar kriteria rencana (Plan Adherence = TIDAK)."
+            else:
+                summary = f"🛡️ **Rugi Terkontrol (1R Risk)**: Posisi **{direction} {pair}** menyentuh Stop Loss ({rr} R). Eksekusi sudah sesuai rencana, kerugian ini adalah variansi statistik wajar."
+        elif outcome == "WIN":
+            if not adherence:
+                summary = f"⚠️ **Lucky Win (Hasil Profit, Proses Impulsif)**: Posisi **{direction} {pair}** memanen profit +{rr} R, NAMUN dieksekusi di luar kriteria rencana (Plan Adherence = TIDAK). Jangan biarkan hasil positif mengaburkan proses yang berisiko tinggi!"
+            elif is_counter_htf:
+                summary = f"⚔️ **Counter-Trend Scalp Win**: Posisi **{direction} {pair}** memanen profit +{rr} R melawan trend HTF ({htf.upper()}). Walaupun untung, perketat kriteria counter-trend agar tidak terjebak reversal mendadak."
+            elif rr >= 2.0:
+                summary = f"🔥 **Eksekusi Presisi SMC**: Posisi **{direction} {pair}** berhasil memanen profit +{rr} R dengan disiplin rencana tinggi. Smart Money Order Flow terisi presisi hingga target."
+            else:
+                summary = f"🎯 **Profit Terukur**: Posisi **{direction} {pair}** menghasilkan profit +{rr} R sesuai rencana."
+        else: # BREAKEVEN
+            summary = f"⚖️ **Breakeven Defense**: Posisi **{direction} {pair}** ditutup pada 0 R. Pengamanan titik BE melindungi modal dari pergerakan pembalikan."
 
         # Duration context
         if holding_mins > 0:
@@ -702,58 +829,53 @@ Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
                 f"Trader profesional yang berhasil menumbuhkan akun modal kecil HANYA mengeksekusi posisi yang memenuhi 100% kriteria SMC. Jangan biarkan emosi *{psych_tags}* membajak keputusan entry Anda!"
             )
 
-        if psych["free_notes"]:
+        if psych.get("free_notes"):
             psych_review += f"\n• *Refleksi Jurnal*: \"{psych['free_notes']}\""
 
-        htf = mkt.get("trend_htf", "N/A")
-        ltf = mkt.get("trend_ltf", "N/A")
-        if htf != "N/A" and ltf != "N/A":
-            if (direction == "LONG" and htf.lower() == "bullish") or (direction == "SHORT" and htf.lower() == "bearish"):
-                psych_review += f"\n• *Struktur Pasar*: 🔥 Entry **{direction}** searah dengan Trend HTF ({htf.upper()}), memberikan dorongan konfluensi institusional yang kuat."
-            elif (direction == "LONG" and htf.lower() == "bearish") or (direction == "SHORT" and htf.lower() == "bullish"):
-                psych_review += f"\n• *Struktur Pasar*: ⚠️ Entry **{direction}** berlawanan arah dengan Trend HTF ({htf.upper()}). Perdagangan *Counter-Trend* membutuhkan konfirmasi *Liquidity Sweep & CHOCH LTF* yang sangat presisi."
+        if is_aligned_htf:
+            psych_review += f"\n• *Struktur Pasar*: 🔥 Entry **{direction}** searah dengan Trend HTF ({htf.upper()}), memberikan dorongan konfluensi institusional yang kuat."
+        elif is_counter_htf:
+            psych_review += f"\n• *Struktur Pasar*: ⚠️ Entry **{direction}** berlawanan arah dengan Trend HTF ({htf.upper()}). Perdagangan *Counter-Trend* membutuhkan konfirmasi *Liquidity Sweep & CHOCH LTF* yang sangat presisi."
 
-        # 3. Historical Setup Comparison
-        if hist["sample_size"] > 0:
-            hist_review = (
-                f"Populasi data statistik untuk kombinasi setup **[{setup_str}]** mencatat **{hist['sample_size']} trade** historis serupa "
-                f"dengan Win Rate **{hist['win_rate_pct']}%** dan Expectancy jangka panjang **{hist['expectancy_r']} R**.\n"
-            )
-            if outcome == "WIN" and rr > hist["avg_rr"]:
-                hist_review += f"Hasil trade ini (+{rr} R) **melampaui rata-rata R-Multiple historisnya ({hist['avg_rr']} R)**, membuktikan presisi penempatan TP di area Liquidity Pool lawan."
-            elif outcome == "LOSS":
-                hist_review += f"Meskipun trade ini berakhir rugi, ekspektasi statistik jangka panjang setup **[{setup_str}]** tetap **{hist['expectancy_r']} R**. Dalam model 1R Equity Risk, variansi rugi pendek tidak boleh mengganggu keyakinan eksekusi Anda."
-        else:
+        # 3. Historical Setup Comparison & Sample Guard (Task 3)
+        sample_sz = hist.get("sample_size", 0)
+        is_sig = hist.get("is_statistically_significant", False)
+
+        if sample_sz == 0:
             hist_review = (
                 f"Ini adalah transaksi awal untuk kombinasi setup **[{setup_str}]**. Data sampel historis belum mencukupi ($n=0$). "
-                f"Kumpulkan hingga 20 trade bertag identik untuk mengaktifkan kalkulasi Edge Discovery."
+                f"Kumpulkan hingga {cls.MIN_SAMPLE_SIZE_FOR_EDGE_CLAIM} trade bertag identik untuk mengaktifkan kalkulasi Edge Discovery."
             )
+        elif not is_sig:
+            hist_review = (
+                f"⚠️ **PERHATIAN STATISTIK (Sampel Belum Cukup)**: Populasi data untuk setup **[{setup_str}]** baru mencatat **{sample_sz} trade** "
+                f"(Win Rate {hist.get('win_rate_pct', 0)}%, Expectancy {hist.get('expectancy_r', 0)} R).\n"
+                f"Ukuran sampel ini **TERLALU KECIL** (< {cls.MIN_SAMPLE_SIZE_FOR_EDGE_CLAIM} trade) untuk disimpulkan sebagai edge 'terbukti profit' atau 'bocor'. "
+                f"Sampaikan angka ini sebagai observasi awal dan terus kumpulkan data sebelum mengambil kesimpulan."
+            )
+        else:
+            hist_review = (
+                f"✅ **Statistik Valid ($n={sample_sz} \\ge {cls.MIN_SAMPLE_SIZE_FOR_EDGE_CLAIM}$)**: Kombinasi setup **[{setup_str}]** "
+                f"mencatat Win Rate **{hist['win_rate_pct']}%** dan Expectancy **{hist['expectancy_r']} R**.\n"
+            )
+            if outcome == "WIN" and rr > hist["avg_rr"]:
+                hist_review += f"Hasil trade ini (+{rr} R) **melampaui rata-rata R-Multiple historisnya ({hist['avg_rr']} R)**."
+            elif outcome == "LOSS":
+                hist_review += f"Meskipun trade ini berakhir rugi, ekspektasi statistik jangka panjang setup **[{setup_str}]** tetap **{hist['expectancy_r']} R**."
 
-        # 4. Actionable Key Takeaways for Scaling Account
-        takeaways = []
-        if not adherence:
-            takeaways.append("• **Instruksi Mentor**: Dilarang keras menekan tombol Entry tanpa menandai syarat setup SMC lengkap di Quick-Tag. Kedisiplinan adalah pintu utama pertumbuhan akun.")
-        if outcome == "LOSS" and holding_mins < 10:
-            takeaways.append("• **Instruksi Mentor**: Durasi trade terlalu singkat pasca-entry. Biarkan struktur harga bernapas sesuai perhitungan ATR dan jarak SL awal.")
-        if outcome == "WIN" and rr >= 2.0:
-            takeaways.append("• **Instruksi Mentor**: Kunci profit secara bertahap saat R-Multiple melampaui +2R dengan menggeser SL ke Breakeven setelah pembentukan BOS baru.")
-        if exit_reason == "manual_close":
-            takeaways.append("• **Instruksi Mentor**: Evaluasi alasan penutupan manual pada jurnal. Menutupi posisi terlalu cepat menghancurkan ekspektasi matematis RR tinggi.")
-
-        # Chart Technical Analysis
+        # 4. Honest Chart Review (Task 1.5)
         screenshots = data.get("screenshots", [])
-        setup_tags = data.get("setup_tags", [])
-        tag_str = ", ".join(setup_tags) if setup_tags else "Order Block / Liquidity Sweep / FVG"
         if screenshots:
             stages_str = ", ".join([f"`{s['stage']}`" for s in screenshots])
             chart_review = (
-                f"Tersedia **{len(screenshots)} foto chart** ({stages_str}).\n"
-                f"• *Validasi Tag Setup*: Tag terpilih **[{tag_str}]** dicocokkan secara visual. "
-                f"Konfluensi visual mengonfirmasi bahwa eksekusi dilakukan selaras dengan pergerakan struktur harga SMC (Order Block / FVG mitigation)."
+                f"⚠️ Foto chart tersedia ({stages_str}), tapi mode ini (fallback offline) "
+                f"tidak bisa membaca gambar secara visual. Analisis di bawah berdasarkan "
+                f"data numerik & tag setup [{setup_str}] yang Anda pilih saja — "
+                f"bukan validasi visual order block/FVG di chart Anda."
             )
         else:
             chart_review = (
-                f"⚠️ Kriteria tag **[{tag_str}]** telah dipilih di Quick-Tag, namun foto chart 4H/1H belum diunggah. "
+                f"⚠️ Kriteria tag **[{setup_str}]** telah dipilih di Quick-Tag, namun foto chart 4H/1H belum diunggah. "
                 f"Disiplin mengunggah chart sebelum entry (4H/1H) dan pasca-exit adalah kewajiban untuk evaluasi presisi teknikal secara objektif."
             )
 
@@ -762,18 +884,26 @@ Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
         eq_phase = eq_growth.get("equity_phase", "STABLE_BASELINE")
         cum_r_traj = eq_growth.get("cumulative_r_trajectory", 0.0)
         daily_str = eq_growth.get("daily_progression_str", "Belum ada transaksi")
-        
+
         equity_review = (
             f"Fase Kurva Ekuitas: **{eq_phase}** (Trajektori Kumulatif: **{cum_r_traj:+.2f} R**).\n"
             f"• *Riwayat Pergerakan R Harian*:\n{daily_str}"
         )
 
+        takeaways = []
+        if not adherence:
+            takeaways.append("• **Instruksi Mentor**: Dilarang keras menekan tombol Entry tanpa menandai syarat setup SMC lengkap di Quick-Tag. Kedisiplinan adalah pintu utama pertumbuhan akun.")
+        if outcome == "LOSS" and holding_mins < 15:
+            takeaways.append("• **Instruksi Mentor**: Durasi trade terlalu singkat pasca-entry. Biarkan struktur harga bernapas sesuai perhitungan ATR dan jarak SL awal.")
+        if outcome == "WIN" and rr >= 2.0:
+            takeaways.append("• **Instruksi Mentor**: Kunci profit secara bertahap saat R-Multiple melampaui +2R dengan menggeser SL ke Breakeven setelah pembentukan BOS baru.")
+        if exit_reason == "manual_close":
+            takeaways.append("• **Instruksi Mentor**: Evaluasi alasan penutupan manual pada jurnal. Menutupi posisi terlalu cepat menghancurkan ekspektasi matematis RR tinggi.")
         if not takeaways:
-            takeaways.append("• **Instruksi Mentor**: Pertahankan manajemen risiko 1R ekuitas konstan ($0.96) dan fokus pada konfluensi HTF Discount/Premium Zone.")
+            takeaways.append("• **Instruksi Mentor**: Pertahankan manajemen risiko 1R ekuitas konstan dan fokus pada konfluensi HTF Discount/Premium Zone.")
             takeaways.append("• **Instruksi Mentor**: Selalu tunggu pembentukan *Liquidity Sweep & CHOCH* sebelum mengeksekusi entry di LTF.")
 
         # Refleksi Cara Berpikir Trader Profesional (5 Pertanyaan Kunci Mentor)
-        htf_str = mkt.get("trend_htf", "N/A")
         if outcome == "LOSS":
             if not adherence:
                 why_wrong = "Analisis dan eksekusi mengalami kegagalan utama karena adanya deviasi dari trading plan (impulsif/FOMO). Posisi diambil tanpa konfirmasi struktur Liquidity Sweep & CHOCH yang valid."
@@ -781,6 +911,12 @@ Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
                 should_see_first = "Seharusnya Anda mengidentifikasi arah Trend HTF (4H) dan menunggu lokasi Discount/Premium Zone sebelum memicu trigger di LTF."
                 pros_see = "Trader berpengalaman melihat *Liquidity Pool (Buy-side/Sell-side liquidity)* lawan yang diincar institusi dan sabar menunggu pembalikan harga, bukan mengejar candle impulsif."
                 biggest_lesson = "Jangan pernah mengeksekusi posisi tanpa konfirmasi 100% kriteria plan. 1R loss akibat deviasi plan adalah risiko tidak perlu."
+            elif is_counter_htf:
+                why_wrong = f"Analisis mengeksekusi posisi counter-trend melawan dorongan kuat HTF ({htf.upper()}). Liquidity Sweep HTF belum bersih sempurna sehingga momentum melesat menembus SL."
+                smc_viol = "Pelanggaran konfluensi *HTF Trend Alignment*. Counter-trend tanpa Liquidity Sweep 4H yang terkonfirmasi berisiko tinggi."
+                should_see_first = "Seharusnya Anda melihat zona Invalidation Level 4H dan arah Trend HTF sebelum memicu posisi balik."
+                pros_see = "Trader berpengalaman menunggu Change of Character (CHOCH) di struktur 4H terlebih dahulu sebelum melakukan perdagangan kontra-trend."
+                biggest_lesson = "Berdagang searah trend HTF memberikan win-rate dan R-multiple jauh lebih tinggi daripada memprediksi top/bottom."
             else:
                 why_wrong = f"Analisis teknikal telah selaras dengan rencana SMC, namun pasar mengalami variansi normal/spike volatilitas yang menembus Invalidation Level di area Stop Loss ({rr} R)."
                 smc_viol = "Tidak ada pelanggaran kedisiplinan dasar. Namun pastikan titik SL diletakkan sedikit di luar *Liquidity Sweep High/Low* untuk mengantisipasi stop hunt."
@@ -788,11 +924,18 @@ Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
                 pros_see = "Trader berpengalaman melihat apakah Liquidity Sweep di HTF sudah benar-benar bersih atau masih ada *Unmitigated FVG* di bawah/atas harga."
                 biggest_lesson = "Kerugian 1R dengan kepatuhan rencana yang disiplin adalah biaya bisnis yang sah dalam matematika R-Multiple. Pertahankan manajemen risiko 1R."
         elif outcome == "WIN":
-            why_wrong = "Analisis berjalan efisien sesuai pergerakan *Smart Money Order Flow*. Tidak ditemukan kesalahan struktural fatal pada trade ini."
-            smc_viol = "Prinsip SMC dijalankan dengan presisi (*Mitigation Order Block + FVG imbalance fill*)."
-            should_see_first = "Struktur HTF 4H dan lokasi Liquidity Target di area Unmitigated Zone."
-            pros_see = "Trader berpengalaman mengidentifikasi *Displacement & CHOCH* di LTF yang mengonfirmasi dorongan institusional ke target."
-            biggest_lesson = "Kesabaran menunggu harga tiba di POI utama selalu membuahkan R-Multiple yang tinggi dan efisien."
+            if not adherence:
+                why_wrong = "Posisi menghasilkan profit, tetapi analisis awal memiliki kelemahan mendasar karena eksekusi dilakukan tanpa mematuhi kriteria rencana."
+                smc_viol = "Pelanggaran disiplin *Plan Adherence*. Entry dilakukan secara prematur / impulsif."
+                should_see_first = "Daftar periksa (checklist) kriteria entry SMC sebelum menekan tombol order."
+                pros_see = "Trader profesional melihat bahwa 'Lucky Win' adalah bahaya emosional jangka panjang karena membangun kebiasaan buruk."
+                biggest_lesson = "Profit dari proses yang salah adalah keberuntungan acak. Selalu prioritaskan kualitas proses dibanding P&L."
+            else:
+                why_wrong = "Analisis berjalan efisien sesuai pergerakan *Smart Money Order Flow*. Tidak ditemukan kesalahan struktural fatal pada trade ini."
+                smc_viol = "Prinsip SMC dijalankan dengan presisi (*Mitigation Order Block + FVG imbalance fill*)."
+                should_see_first = "Struktur HTF 4H dan lokasi Liquidity Target di area Unmitigated Zone."
+                pros_see = "Trader berpengalaman mengidentifikasi *Displacement & CHOCH* di LTF yang mengonfirmasi dorongan institusional ke target."
+                biggest_lesson = "Kesabaran menunggu harga tiba di POI utama selalu membuahkan R-Multiple yang tinggi dan efisien."
         else:
             why_wrong = "Analisis awal benar, namun momentum dorongan harga tertahan di area struktur perantara sebelum mencapai target TP utama."
             smc_viol = "Tidak ada pelanggaran berat, namun menggeser SL ke BE terlalu dini dapat membuat posisi terkeluar sebelum ekspansi utama."
@@ -808,36 +951,86 @@ Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
             f"• **Satu Pelajaran Terbesar dari Trade Ini**: {biggest_lesson}"
         )
 
-        # Rapor Penilaian Mentor (Skala 1–10)
-        ms_score = 9 if (htf_str != "N/A" and ((direction == "LONG" and htf_str.lower() == "bullish") or (direction == "SHORT" and htf_str.lower() == "bearish"))) else 7
-        lr_score = 9 if outcome == "WIN" else (7 if adherence else 5)
-        bias_score = 9 if ms_score == 9 else 6
-        entry_score = 9 if (outcome == "WIN" and holding_mins <= 240) else (7 if outcome != "LOSS" else 6)
-        rm_score = 10 if (adherence and exit_reason in ("stop_loss", "take_profit", "breakeven")) else (8 if adherence else 5)
-        overall_score = round((ms_score + lr_score + bias_score + entry_score + rm_score) / 5, 1)
+        # 5. Strict Scorecard Ratings (Task 2.2 & 2.3)
+        # Market Structure
+        if is_aligned_htf:
+            ms_score = 8
+        elif is_counter_htf:
+            ms_score = 5
+        else:
+            ms_score = 6
+
+        # Liquidity Reading
+        if screenshots and is_aligned_htf and outcome == "WIN":
+            lr_score = 8
+        elif screenshots and adherence:
+            lr_score = 7
+        else:
+            lr_score = 5
+
+        # Bias Score
+        if is_aligned_htf and conf >= 7:
+            bias_score = 8
+        elif conf >= 8 and outcome == "LOSS" and is_counter_htf:
+            bias_score = 4  # Overconfidence in counter-trend loss
+        else:
+            bias_score = 6
+
+        # Entry Timing Score (Task 2.3)
+        if outcome == "WIN" and holding_mins <= 240 and adherence and screenshots:
+            entry_score = 8
+        elif outcome == "LOSS" and holding_mins < 15:
+            entry_score = 4
+        elif not adherence:
+            entry_score = 5
+        else:
+            entry_score = 6
+
+        # Risk Management Score (Task 2.2: Strict Rule - 10 ONLY if SL/TP matches plan and no risk widening)
+        moved_be = exec_det.get("moved_to_breakeven", False)
+        if not adherence:
+            rm_score = 4
+        elif exit_reason == "manual_close":
+            rm_score = 5
+        elif outcome == "LOSS" and abs(rr) > 1.2:
+            rm_score = 5  # SL widened
+        elif outcome == "WIN" and exit_reason == "take_profit" and rr_planned and abs(rr - float(rr_planned)) < 0.2 and not moved_be:
+            rm_score = 10
+        elif adherence and exit_reason in ("take_profit", "stop_loss", "breakeven"):
+            rm_score = 8
+        else:
+            rm_score = 6
+
+        overall_score = round((ms_score + lr_score + bias_score + entry_score + rm_score) / 5.0, 1)
 
         scorecard_review = (
             f"• **Market Structure**: {ms_score}/10\n"
             f"• **Liquidity Reading**: {lr_score}/10\n"
             f"• **Bias**: {bias_score}/10\n"
-            f"• **Entry Timing**: {entry_score}/10\n"
+            f"• **Entry Timing**: {entry_score}/10 *(Catatan: Data presisi jarak dari POI/distance_from_poi_pct belum tercatat di MarketContext)*\n"
             f"• **Risk Management**: {rm_score}/10\n"
             f"• **Keseluruhan Kualitas Setup**: {overall_score}/10"
         )
 
-        # Klasifikasi Tier Setup & Alasan Penilaian
-        if outcome == "WIN" and adherence and rr >= 2.0:
+        # 6. Tier Classification
+        if outcome == "WIN" and adherence and rr >= 2.0 and is_aligned_htf and screenshots:
             tier_class = "A+ Setup"
-            tier_reason = f"Trade memenuhi 100% kriteria SMC, disiplin plan terjaga, dan menghasilkan R-Multiple tinggi (+{rr} R) dengan ekspansi momentum yang presisi."
-        elif outcome == "WIN" or (adherence and outcome == "BREAKEVEN"):
+            tier_reason = f"Trade memenuhi 100% kriteria SMC, disiplin plan terjaga, terhubung foto chart 4H/1H, aligned HTF ({htf.upper()}), dan memanen R-Multiple tinggi (+{rr} R)."
+        elif outcome == "WIN" and adherence:
             tier_class = "A Setup"
-            tier_reason = "Setup memiliki konfluensi struktur yang kuat dan dieksekusi dengan kepatuhan rencana yang baik."
+            tier_reason = "Setup memiliki konfluensi struktur yang baik dan dieksekusi dengan kepatuhan rencana yang disiplin."
+        elif outcome == "WIN" and not adherence:
+            tier_class = "C Setup"
+            tier_reason = "Meskipun menghasilkan profit (+{rr} R), eksekusi dilakukan di luar rencana trading (Plan Adherence = TIDAK). Ini adalah 'Lucky Win' yang berisiko."
+        elif adherence and outcome == "BREAKEVEN":
+            tier_class = "A Setup"
+            tier_reason = "Eksekusi disiplin sesuai rencana dengan pengamanan ekuitas di Breakeven."
         elif adherence and outcome == "LOSS":
             tier_class = "B Setup"
-            tier_reason = "Trade dieksekusi sesuai rencana SMC yang sah, namun mengalami variansi pergerakan pasar (kerugian 1R terukur)."
+            tier_reason = "Trade dieksekusi sesuai rencana SMC yang sah, kerugian 1R adalah variansi pasar yang terkontrol."
         else:
             tier_class = "C Setup"
-            tier_reason = "Terjadi pelanggaran kedisiplinan (Plan Adherence = TIDAK) atau eksekusi impulsif tanpa konfirmasi kriteria SMC secara utuh."
+            tier_reason = "Terjadi pelanggaran kedisiplinan (Plan Adherence = TIDAK) atau eksekusi impulsif tanpa kriteria SMC secara utuh."
 
         tier_review = (
             f"• **Klasifikasi**: 🏆 **{tier_class}**\n"
@@ -847,7 +1040,7 @@ Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
         return f"""📌 **Analisis Eksekusi SMC & Order Flow Pasar**
 {summary}
 
-📈 **Analisis Teknikal Chart 4H / 1H & Validasi Tag Setup Terpilih [{tag_str}]**
+📈 **Analisis Teknikal Chart 4H / 1H & Validasi Tag Setup Terpilih [{setup_str}]**
 {chart_review}
 
 📉 **Pertumbuhan Ekuitas Akun Harian (Daily Equity Growth & R Trajectory)**
@@ -1019,20 +1212,52 @@ Tuliskan evaluasi dalam 9 bagian Markdown terstruktur khas Mentor SMC Senior:
 
         gold_setups = []
         leak_setups = []
+        cautious_setups = []
+        insufficient_data_setups = []
+
         for tag, s in tag_stats.items():
-            wr = (s["wins"] / s["count"]) * 100.0
-            avg_r = s["total_r"] / s["count"]
-            if wr >= 60.0 and s["total_r"] > 0:
-                gold_setups.append(f"• 🌟 **{tag}**: {s['count']} trade | Win Rate {wr:.1f}% | Total R: {s['total_r']:+.2f} R (Avg: {avg_r:+.2f}R) -> *Instruksi Mentor*: **FOKUS & DOUBLE DOWN** (Performa statistik sangat tinggi!)")
-            elif wr < 50.0 or s["total_r"] < 0:
-                leak_setups.append(f"• ⚠️ **{tag}**: {s['count']} trade | Win Rate {wr:.1f}% | Total R: {s['total_r']:+.2f} R (Avg: {avg_r:+.2f}R) -> *Instruksi Mentor*: **STOP & EVALUASI** (Bocoran ekuitas, uji ulang di backtest!)")
+            wr = (s["wins"] / s["count"]) * 100.0 if s["count"] > 0 else 0.0
+            avg_r = s["total_r"] / s["count"] if s["count"] > 0 else 0.0
+
+            if s["count"] < cls.MIN_SAMPLE_SIZE_FOR_CAUTIOUS_NOTE:
+                insufficient_data_setups.append(
+                    f"• ❔ **{tag}**: {s['count']} trade | Total R: {s['total_r']:+.2f}R "
+                    f"-> *Data belum cukup ({s['count']}/{cls.MIN_SAMPLE_SIZE_FOR_CAUTIOUS_NOTE}) untuk klasifikasi apapun, terus kumpulkan sampel.*"
+                )
+            elif s["count"] < cls.MIN_SAMPLE_SIZE_FOR_EDGE_CLAIM:
+                if wr >= 60.0 and s["total_r"] > 0:
+                    cautious_setups.append(
+                        f"• 🟡 **{tag}**: {s['count']} trade | Win Rate {wr:.1f}% | Total R: {s['total_r']:+.2f}R (Avg: {avg_r:+.2f}R) "
+                        f"-> *Sinyal awal positif, tapi sampel MASIH KECIL ({s['count']}/{cls.MIN_SAMPLE_SIZE_FOR_EDGE_CLAIM}) — jangan scale up dulu, kumpulkan lebih banyak data.*"
+                    )
+                elif wr < 50.0 or s["total_r"] < 0:
+                    cautious_setups.append(
+                        f"• 🟡 **{tag}**: {s['count']} trade | Win Rate {wr:.1f}% | Total R: {s['total_r']:+.2f}R (Avg: {avg_r:+.2f}R) "
+                        f"-> *Sinyal awal negatif, sampel masih kecil ({s['count']}/{cls.MIN_SAMPLE_SIZE_FOR_EDGE_CLAIM}) — waspadai tapi belum kesimpulan final.*"
+                    )
+            else:
+                if wr >= 60.0 and s["total_r"] > 0:
+                    gold_setups.append(
+                        f"• 🌟 **{tag}**: {s['count']} trade | Win Rate {wr:.1f}% | Total R: {s['total_r']:+.2f}R (Avg: {avg_r:+.2f}R) "
+                        f"-> *Instruksi Mentor*: **FOKUS & DOUBLE DOWN** (Statistik terbukti kuat: n >= {cls.MIN_SAMPLE_SIZE_FOR_EDGE_CLAIM})"
+                    )
+                elif wr < 50.0 or s["total_r"] < 0:
+                    leak_setups.append(
+                        f"• ⚠️ **{tag}**: {s['count']} trade | Win Rate {wr:.1f}% | Total R: {s['total_r']:+.2f}R (Avg: {avg_r:+.2f}R) "
+                        f"-> *Instruksi Mentor*: **STOP & EVALUASI** (Bocoran ekuitas terbukti pada n >= {cls.MIN_SAMPLE_SIZE_FOR_EDGE_CLAIM})"
+                    )
 
         edge_taxonomy_lines = []
         if gold_setups:
-            edge_taxonomy_lines.append("🌟 **SETUP EMAS (Edge Terbukti - Fokus & Scale)**:\n" + "\n".join(gold_setups))
+            edge_taxonomy_lines.append("🌟 **SETUP EMAS (Edge Terbukti Valid: n ≥ 20 - Scale Up)**:\n" + "\n".join(gold_setups))
         if leak_setups:
-            edge_taxonomy_lines.append("⚠️ **SETUP BOCOR/LEMAH (Perlu Perbaikan/Hentikan)**:\n" + "\n".join(leak_setups))
-        edge_taxonomy_str = "\n\n".join(edge_taxonomy_lines) if edge_taxonomy_lines else "Belum ada pola taksonomi setup yang dominan minggu ini. Pertahankan pengisian Quick-Tag secara konsisten."
+            edge_taxonomy_lines.append("⚠️ **SETUP BOCOR/LEMAH (Bocoran Terbukti: n ≥ 20 - Hentikan)**:\n" + "\n".join(leak_setups))
+        if cautious_setups:
+            edge_taxonomy_lines.append("🟡 **SETUP DENGAN OBSERVASI AWAL (Sampel Masih Kecil: 5 ≤ n < 20)**:\n" + "\n".join(cautious_setups))
+        if insufficient_data_setups:
+            edge_taxonomy_lines.append("❔ **SETUP DENGAN DATA BELUM CUKUP (n < 5)**:\n" + "\n".join(insufficient_data_setups))
+
+        edge_taxonomy_str = "\n\n".join(edge_taxonomy_lines) if edge_taxonomy_lines else "Belum ada taksonomi setup yang dicatat minggu ini. Tingkatkan pengisian Quick-Tag."
 
         # 2. Market Context Collector Macro Summary
         mkt_rows = db.query(MarketContext).filter(MarketContext.trade_id.in_(trade_ids)).all() if trade_ids else []
